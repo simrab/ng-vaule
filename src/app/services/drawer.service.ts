@@ -55,7 +55,6 @@ export class DrawerService {
       const offset = isDragging 
         ? snapPointOffset + this.calculateDragDelta()
         : snapPointOffset;
-
       return isVertical(this.directionSubject.value)
         ? `translateY(${offset}px)`
         : `translateX(${offset}px)`;
@@ -117,8 +116,10 @@ export class DrawerService {
         ]).pipe(
           map(([drawer, currentPosition, snapPointOffset]) => {
             if (!currentPosition || snapPointOffset === null) return;
-
             const dragDelta = this.calculateDragDelta();
+            if(dragDelta <= 0) {
+              return;
+            }
             const transform = isVertical(this.directionSubject.value)
               ? `translateY(${snapPointOffset + dragDelta}px)`
               : `translateX(${snapPointOffset + dragDelta}px)`;
@@ -168,7 +169,6 @@ export class DrawerService {
     // Get the active snap point
     this.snapPointsService.activeSnapPoint$.pipe(
       map(snapPointOffset => {
-        debugger
         const offset = snapPointOffset === null 
           ? drawer?.getBoundingClientRect().height || 0 
           : snapPointOffset;
@@ -242,10 +242,12 @@ export class DrawerService {
 
   onRelease(event: PointerEvent | null) {
     if (!event || !this.isDraggingSubject.value) return;
-    
+
     const velocity = this.calculateVelocity(event);
     const dragDelta = this.calculateDragDelta();
-
+    if(dragDelta <= 0) {
+      return;
+    }
     // Coordinate release behavior with snap points
     this.snapPointsService.onRelease({
       draggedDistance: dragDelta,
@@ -272,11 +274,12 @@ export class DrawerService {
     const dragDelta = this.calculateDragDelta();
     const drawer = this.drawerRefSubject.value;
     const currentTransform = dragDelta;
-    
+    if(dragDelta <=0) {
+      return;
+    }
     // Apply transform directly
     drawer.style.transform = `translateY(${currentTransform}px)`;
     drawer.style.transition = 'none';
-    
     this.snapPointsService.onDrag({
       draggedDistance: dragDelta,
       currentOffset: currentTransform

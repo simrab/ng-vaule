@@ -176,10 +176,12 @@ export class SnapPointsService {
 
         // Handle velocity-based snapping
         if (velocity > VELOCITY_THRESHOLD) {
-          const hasDraggedUp = draggedDistance > 0;
+          debugger;
+          const hasDraggedUp = draggedDistance < 0;
           if (hasDraggedUp) {
             this.snapToPoint(offset[offset.length - 1]);
           } else if (dismissible) {
+            debugger;
             closeDrawer();
           } else {
             this.snapToPoint(offset[0]);
