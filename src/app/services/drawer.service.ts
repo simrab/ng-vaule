@@ -1,389 +1,564 @@
-import { Injectable, inject } from '@angular/core';
-import { BehaviorSubject, EMPTY, Subject, combineLatest, map, of, switchMap, take, takeUntil } from 'rxjs';
-import { DrawerDirection } from '../types';
-import { TRANSITIONS } from './constants';
+import { Injectable } from '@angular/core';
+import { BehaviorSubject, Observable, Subject, combineLatest, map, takeUntil } from 'rxjs';
+import { DrawerDirection, DrawerDirectionType } from '../types';
+import {
+  BORDER_RADIUS,
+  CLOSE_THRESHOLD,
+  DRAG_CLASS,
+  SCROLL_LOCK_TIMEOUT,
+  TRANSITIONS,
+  VELOCITY_THRESHOLD,
+  WINDOW_TOP_OFFSET,
+} from './constants';
 import { isVertical, set } from './helpers';
-import { SnapPointsService } from './snap-points.service';
 
 @Injectable({
-  providedIn: 'root'
+  providedIn: 'root',
 })
 export class DrawerService {
-  snapPointsService = inject(SnapPointsService);
   private destroy$ = new Subject<void>();
-  private stateChange$ = new BehaviorSubject<void>(undefined);
-  
+  // Excerpt from: class DrawerService
+  public stateChange$ = new BehaviorSubject<void>(undefined);
+
   // Core state subjects
-  private readonly isOpenSubject = new BehaviorSubject<boolean>(false);
-  private readonly isDraggingSubject = new BehaviorSubject<boolean>(false);
-  private readonly drawerRefSubject = new BehaviorSubject<HTMLElement | null>(null);
-  private readonly overlayRefSubject = new BehaviorSubject<HTMLElement | null>(null);
-  private readonly directionSubject = new BehaviorSubject<DrawerDirection>('bottom');
-  private dragStartPositionSubject = new BehaviorSubject<{ x: number, y: number } | null>(null);
-  private shouldScaleBackgroundSubject = new BehaviorSubject<boolean>(false);
-  private setBackgroundColorOnScaleSubject = new BehaviorSubject<boolean>(false);
-  private noBodyStylesSubject = new BehaviorSubject<boolean>(false);
-  private nestedSubject = new BehaviorSubject<boolean>(false);
-  private modalSubject = new BehaviorSubject<boolean>(false);
-  private hasBeenOpenedSubject = new BehaviorSubject<boolean>(false);
-  private preventScrollRestorationSubject = new BehaviorSubject<boolean>(false);
-  private currentPointerPositionSubject = new BehaviorSubject<{ x: number, y: number } | null>(null);
+  public isOpen$ = new BehaviorSubject<boolean>(false);
+  public isDragging$ = new BehaviorSubject<boolean>(false);
+  public isDraggingObs$ = this.isDragging$.asObservable();
+  public drawerRef$ = new BehaviorSubject<HTMLDivElement | null>(null);
+  public drawerRefObs$ = this.drawerRef$.asObservable();
+  public overlayRef$ = new BehaviorSubject<HTMLElement | null>(null);
+  public direction$ = new BehaviorSubject<DrawerDirectionType>(DrawerDirection.BOTTOM);
+  public dragStartPosition$ = new BehaviorSubject<{ y: number } | null>(null);
+  public shouldScaleBackground$ = new BehaviorSubject<boolean>(false);
+  public setBackgroundColorOnScale$ = new BehaviorSubject<boolean>(false);
+  public noBodyStyles$ = new BehaviorSubject<boolean>(false);
+  public nested$ = new BehaviorSubject<boolean>(false);
+  public modal$ = new BehaviorSubject<boolean>(false);
+  public hasBeenOpened$ = new BehaviorSubject<boolean>(false);
+  public preventScrollRestoration$ = new BehaviorSubject<boolean>(false);
+  private currentPointerPosition$ = new BehaviorSubject<{ y: number } | null>(null);
+  public currentPointerPositionObs$: Observable<{ y: number } | null> = this.currentPointerPosition$.asObservable();
+  public wasBeyondThePoint$ = new BehaviorSubject<boolean | null>(null);
+  public pointerStart$ = new BehaviorSubject<{ x?: number; y?: number } | null>(null);
+  public dragEndTime$ = new BehaviorSubject<Date | null>(null);
+  public dragStartTime$ = new BehaviorSubject<Date | null>(null);
+  public drawerHeightorWidth$ = new BehaviorSubject<number | null>(null);
+  public drawerWidth$ = new BehaviorSubject<number | null>(null);
+  public isAllowedToDrag$ = new BehaviorSubject<boolean>(false);
+  public openTime$ = new BehaviorSubject<Date | null>(null);
 
-  // Public observables
-  readonly isOpen$ = this.isOpenSubject.asObservable();
-  readonly isDragging$ = this.isDraggingSubject.asObservable();
-  readonly direction$ = this.directionSubject.asObservable();
-  readonly drawerRef$ = this.drawerRefSubject.asObservable();
-  readonly overlayRef$ = this.overlayRefSubject.asObservable();
-  readonly shouldScaleBackground$ = this.shouldScaleBackgroundSubject.asObservable();
-  readonly setBackgroundColorOnScale$ = this.setBackgroundColorOnScaleSubject.asObservable();
-  readonly noBodyStyles$ = this.noBodyStylesSubject.asObservable();
-  readonly nested$ = this.nestedSubject.asObservable();
-  readonly modal$ = this.modalSubject.asObservable();
-  readonly hasBeenOpened$ = this.hasBeenOpenedSubject.asObservable();
-  // Computed observable that combines drawer and snap point state
-  drawerTransform$ = combineLatest([
-    this.drawerRefSubject,
-    this.isDraggingSubject,
-    this.snapPointsService.activeSnapPoint$
-  ]).pipe(
-    map(([drawer, isDragging, snapPointOffset]) => {
-      if (!drawer) return null;
-      if (snapPointOffset === null) {
-        snapPointOffset = 0;
-      };
-      const offset = isDragging 
-        ? snapPointOffset + this.calculateDragDelta()
-        : snapPointOffset;
+  private lastTimeDragPrevented: Date | null = null;
 
-      return isVertical(this.directionSubject.value)
-        ? `translateY(${offset}px)`
-        : `translateX(${offset}px)`;
-    })
+  drawerTransform$ = combineLatest([this.drawerRefObs$, this.isDraggingObs$]).pipe(
+    map(([drawer, isDragging]) => {
+      // if (!drawer) return null;
+      // const offset = isDragging ? this.calculateDragDelta() : 0;
+      // return isVertical(this.direction$.value) ? `translateY(${offset}px)` : `translateX(${offset}px)`;
+    }),
   );
-
   constructor() {
     // Subscribe to state changes
-    this.stateChange$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(() => {
-        const drawer = this.drawerRefSubject.value;
-        if (!drawer) return;
-
-        // Only update transform if drawer is open
-        if (this.isOpenSubject.value) {
-          this.updateDrawerTransform(drawer);
-        }
-      });
+    this.stateChange$.pipe(takeUntil(this.destroy$)).subscribe(() => {
+      // const drawer = this.drawerRef$.value;
+      // const direction = this.direction$.value;
+      // if (!drawer) return;
+      // if (this.isOpen$.value) {
+      //   this.updateDrawerTransform(drawer, direction);
+      // }
+    });
 
     // Subscribe to drawer ref changes
-    this.drawerRefSubject
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(drawer => {
-        if (!drawer) return;
-        if (!this.isOpenSubject.value) {
-          const height = drawer.getBoundingClientRect().height;
-          drawer.style.transform = `translateY(${height}px)`;
-        }
-      });
-
-    // Subscribe to active snap point changes
-    this.snapPointsService.activeSnapPoint$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(snapPointOffset => {
-        const drawer = this.drawerRefSubject.value;
-        if (!drawer || !snapPointOffset) return;
-
-        const transform = isVertical(this.directionSubject.value)
-          ? `translateY(${snapPointOffset}px)`
-          : `translateX(${snapPointOffset}px)`;
-
-        drawer.style.transform = transform;
-        drawer.style.transition = this.isDraggingSubject.value ? 'none' : 
-          `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`;
-      });
+    this.drawerRefObs$.pipe(takeUntil(this.destroy$)).subscribe((drawer: HTMLDivElement | null) => {
+      // if (!drawer) return;
+      // const direction = this.direction$.value;
+      // if (!this.isOpen$.value) {
+      //   const height = drawer.getBoundingClientRect().height;
+      //   const width = drawer.getBoundingClientRect().width;
+      //   drawer.style.transform = isVertical(direction) ? `translateY(${height}px)` : `translateX(${width}px)`;
+      // }
+    });
 
     // Subscribe to drag state changes
-    this.isDraggingSubject.pipe(
-      takeUntil(this.destroy$),
-      switchMap(isDragging => {
-        const drawer = this.drawerRefSubject.value;
-        if (!drawer || !isDragging) return EMPTY;
+    this.isDragging$
+      .asObservable()
+      .pipe(
+        takeUntil(this.destroy$),
+        // switchMap((isDragging) => {
+        //   const drawer = this.drawerRef$.value;
+        //   if (!drawer || !isDragging) return EMPTY;
 
-        return combineLatest([
-          of(drawer),
-          this.currentPointerPositionSubject,
-          this.snapPointsService.activeSnapPoint$
-        ]).pipe(
-          map(([drawer, currentPosition, snapPointOffset]) => {
-            if (!currentPosition || snapPointOffset === null) return;
+        //   return combineLatest([of(drawer), this.currentPointerPositionObs$]).pipe(
+        //     map(([drawer, currentPosition]) => {
+        //       if (!currentPosition) return;
+        //       const dragDelta = this.calculateDragDelta();
+        //       if (dragDelta <= 0) {
+        //         return;
+        //       }
 
-            const dragDelta = this.calculateDragDelta();
-            const transform = isVertical(this.directionSubject.value)
-              ? `translateY(${snapPointOffset + dragDelta}px)`
-              : `translateX(${snapPointOffset + dragDelta}px)`;
-
-            drawer.style.transform = transform;
-            drawer.style.transition = 'none';
-          })
-        );
-      })
-    ).subscribe();
+        //       drawer.style.transition = 'none';
+        //     }),
+        //   );
+        // }),
+      )
+      .subscribe();
 
     // Watch for open state changes
-    this.isOpenSubject
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(isOpen => {
-        if (isOpen) {
-          this.snapPointsService.snapPoints$.pipe(
-            take(1)
-          ).subscribe(points => {
-            if (points?.length) {
-              this.snapPointsService.setActiveSnapPoint(points[0]);
-            }
-          });
-        } else {
-          this.snapPointsService.setActiveSnapPoint(null);
-          const drawer = this.drawerRefSubject.value;
-          if (drawer) {
-            const height = drawer.getBoundingClientRect().height;
-            drawer.style.transform = `translateY(${height}px)`;
-          }
-        }
-      });
+    // this.isOpen$.pipe(takeUntil(this.destroy$)).subscribe((isOpen: boolean) => {
+    //   if (!isOpen) {
+    //     const drawer = this.drawerRef$.value;
+    //     if (drawer) {
+    //       const height = drawer.getBoundingClientRect().height;
+    //       const width = drawer.getBoundingClientRect().height;
+    //       const direction = this.direction$.value;
+    //       drawer.style.transform = isVertical(direction) ? `translateY(${height}px)` : `translateX(${width}px)`;
+    //     }
+    //   }
+    // });
   }
 
   // State updaters
   setIsOpen(isOpen: boolean) {
-    if (isOpen === this.isOpenSubject.value) return;
-    
-    this.isOpenSubject.next(isOpen);
-    if (isOpen) {
-      this.hasBeenOpenedSubject.next(true);
-    }
-    this.stateChange$.next();
+    // if (isOpen === this.isOpen$.value) return;
+    // this.isOpen$.next(isOpen);
+    // if (isOpen) {
+    //   this.hasBeenOpened$.next(true);
+    // }
+    // this.stateChange$.next();
   }
 
-  private updateDrawerTransform(drawer: HTMLElement) {
-    // Get the active snap point
-    this.snapPointsService.activeSnapPoint$.pipe(
-      map(snapPointOffset => {
-        debugger
-        const offset = snapPointOffset === null 
-          ? drawer?.getBoundingClientRect().height || 0 
-          : snapPointOffset;
+  private updateDrawerTransform(drawer: HTMLElement, direction: DrawerDirectionType) {
+    const offset = isVertical(direction)
+      ? drawer?.getBoundingClientRect().width
+      : drawer?.getBoundingClientRect().height;
 
-        // Get current drag state
-        const isDragging = this.isDraggingSubject.value;
-        const dragDelta = isDragging ? this.calculateDragDelta() : 0;
-        const finalOffset = offset + dragDelta;
-
-        const transform = isVertical(this.directionSubject.value)
-          ? `translateY(${finalOffset}px)`
-          : `translateX(${finalOffset}px)`;
-
-        set(drawer, {
-          transition: isDragging ? 'none' : 
-            `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
-          transform
-        });
-      }),
-      take(1)
-    ).subscribe();
+    // Get current drag state
+    const isDragging = this.isDragging$.value;
+    const dragDelta = isDragging ? this.calculateDragDelta() : 0;
+    const finalOffset = offset + dragDelta;
+    const transform = isVertical(direction)
+      ? `translateY(${finalOffset - offset}px)`
+      : `translateX(${finalOffset - offset}px)`;
+    set(drawer, {
+      transition: isDragging
+        ? 'none'
+        : `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
+      transform,
+    });
   }
 
   setIsDragging(isDragging: boolean) {
-    this.isDraggingSubject.next(isDragging);
+    this.isDragging$.next(isDragging);
     this.stateChange$.next();
   }
 
-  setDirection(direction: DrawerDirection) {
-    this.directionSubject.next(direction);
-    this.snapPointsService.setDirection(direction);
+  setDirection(direction: DrawerDirectionType) {
+    this.direction$.next(direction);
     this.stateChange$.next();
   }
 
-  setDrawerRef(ref: HTMLElement | null) {
+  setDrawerRef(ref: HTMLDivElement | null) {
     if (ref) {
       // Set initial transform to hide drawer
       const height = ref.getBoundingClientRect().height;
-      ref.style.transform = `translateY(${height}px)`;
+      const width = ref.getBoundingClientRect().width;
+      ref.style.transform = isVertical(this.direction$.value) ? `translateY(${height}px)` : `translateX(${width}px)`;
     }
-    
-    this.drawerRefSubject.next(ref);
-    this.snapPointsService.setRefs(ref, this.overlayRefSubject.value);
+
+    this.drawerRef$.next(ref);
     this.stateChange$.next();
   }
 
   setOverlayRef(ref: HTMLElement | null) {
-    this.overlayRefSubject.next(ref);
-    this.snapPointsService.setRefs(this.drawerRefSubject.value, ref);
+    this.overlayRef$.next(ref);
     this.stateChange$.next();
   }
 
-  // Expose observables
-  snapPointsOffset$ = this.snapPointsService.snapPointsOffset$;
-  activeSnapPoint$ = this.snapPointsService.activeSnapPoint$;
-
-  // Event handlers
-  onPress(event: PointerEvent) {
-    if (!this.drawerRefSubject.value) return;
-    
-    this.isDraggingSubject.next(true);
-    this.dragStartPositionSubject.next({
-      x: event.clientX,
-      y: event.clientY
+  onPress(event: PointerEvent, element?: HTMLDivElement) {
+    if (!element) return;
+    // Ensure we maintain correct pointer capture even when going outside of the drawer
+    (event.target as HTMLElement).setPointerCapture(event.pointerId);
+    this.isDragging$.next(true);
+    this.dragStartPosition$.next({
+      y: event.clientY,
     });
-    this.currentPointerPositionSubject.next({
-      x: event.clientX,
-      y: event.clientY
+    this.currentPointerPosition$.next({
+      y: event.clientY,
     });
   }
 
-  onRelease(event: PointerEvent | null) {
-    if (!event || !this.isDraggingSubject.value) return;
-    
-    const velocity = this.calculateVelocity(event);
+  onRelease(
+    event: PointerEvent | null,
+    direction: DrawerDirectionType,
+    element?: HTMLDivElement,
+    starterPosition?: number,
+    dragStartTime?: Date,
+    dragEndTime?: Date,
+  ) {
+    if (!element) return;
+    if (!event || !this.isDragging$.value) return;
+    this.dragEndTime$.next(new Date());
+
+    const timeTaken = (dragEndTime?.getTime() || 0) - (dragStartTime?.getTime() || 0);
+    const distMoved = (starterPosition || 0) - (isVertical(direction) ? event.pageY : event.pageX);
+    const velocity = Math.abs(distMoved) / timeTaken;
     const dragDelta = this.calculateDragDelta();
+    const swipeAmount = this.getTranslate(element, direction);
+    if (dragDelta <= 0) {
+      return;
+    }
 
-    // Coordinate release behavior with snap points
-    this.snapPointsService.onRelease({
-      draggedDistance: dragDelta,
-      velocity,
-      closeDrawer: () => {
-        this.isOpenSubject.next(false);
-        this.snapPointsService.setActiveSnapPoint(null);
-      },
-      dismissible: true
+    if (direction === DrawerDirection.BOTTOM || direction === DrawerDirection.RIGHT ? distMoved > 0 : distMoved < 0) {
+      this.resetDrawer(direction, element);
+      return;
+    }
+    if (velocity > VELOCITY_THRESHOLD) {
+      this.closeDrawer(element);
+      return;
+    }
+    const visibleDrawerHeight = Math.min(element?.getBoundingClientRect().height ?? 0, window.innerHeight);
+    const visibleDrawerWidth = Math.min(element?.getBoundingClientRect().width ?? 0, window.innerWidth);
+    if (
+      Math.abs(swipeAmount || 0) >=
+      (isVertical(direction) ? visibleDrawerHeight : visibleDrawerWidth) * CLOSE_THRESHOLD
+    ) {
+      this.closeDrawer(element);
+      this.isDragging$.next(false);
+      this.dragStartPosition$.next(null);
+      return;
+    }
+    this.resetDrawer(direction, element);
+  }
+  resetDrawer(direction: DrawerDirectionType, element?: HTMLDivElement) {
+    if (!element) return;
+    const wrapper = document.querySelector('[data-vaul-drawer-wrapper]');
+    const currentSwipeAmount = this.getTranslate(element, this.direction$.value);
+
+    set(element, {
+      transform: 'translate3d(0, 0, 0)',
+      transition: `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
     });
 
-    this.isDraggingSubject.next(false);
-    this.dragStartPositionSubject.next(null);
+    set(this.overlayRef$.value, {
+      transition: `opacity ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
+      opacity: '1',
+    });
+    // Don't reset background if swiped upwards
+    if (this.shouldScaleBackground$.value && currentSwipeAmount && currentSwipeAmount > 0 && this.isOpen$.value) {
+      set(
+        wrapper,
+        {
+          borderRadius: `${BORDER_RADIUS}px`,
+          overflow: 'hidden',
+          ...(isVertical(direction)
+            ? {
+                transform: `scale(${this.getScale()}) translate3d(0, calc(env(safe-area-inset-top) + 14px), 0)`,
+                transformOrigin: 'top',
+              }
+            : {
+                transform: `scale(${this.getScale()}) translate3d(calc(env(safe-area-inset-top) + 14px), 0, 0)`,
+                transformOrigin: 'left',
+              }),
+          transformOrigin: isVertical(direction) ? 'top' : 'left',
+          transitionProperty: 'transform, border-radius',
+          transitionDuration: `${TRANSITIONS.DURATION}s`,
+          transitionTimingFunction: `cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
+        },
+        true,
+      );
+    }
   }
+  onDrag(event: DragEvent | PointerEvent, element?: HTMLDivElement, dismissible: boolean = true) {
+    // const direction = this.direction$.value;
+    // if (!element) return;
+    // // We need to know how much of the drawer has been dragged in percentages so that we can transform background accordingly
+    // if (this.isDragging$.value) {
+    //   const directionMultiplier = direction === 'bottom' || direction === 'right' ? 1 : -1;
+    //   const pointerStartY = this.pointerStart$?.value?.y ?? 0;
+    //   const pointerStartX = this.pointerStart$?.value?.x ?? 0;
+    //   console.log(pointerStartY);
+    //   const draggedDistance =
+    //     (isVertical(direction) ? pointerStartY - event.pageY : pointerStartX - event.pageX) * directionMultiplier;
+    //   const isDraggingInDirection = draggedDistance > -100;
+    //   // We need to capture last time when drag with scroll was triggered and have a timeout between
+    //   const absDraggedDistance = Math.abs(draggedDistance);
+    //   const wrapper = document.querySelector('[data-vaul-drawer-wrapper]');
+    //   const drawerDimension = isVertical(this.direction$.value)
+    //     ? element.getBoundingClientRect().height || 0
+    //     : element.getBoundingClientRect().width || 0;
+    //   // Calculate the percentage dragged, where 1 is the closed position
+    //   let percentageDragged = absDraggedDistance / drawerDimension;
+    //   if (!event.target) return;
+    //   if (!this.isAllowedToDrag$.value && !this.shouldDrag(event.target, isDraggingInDirection)) return;
+    //   element.classList.add(DRAG_CLASS);
+    //   // If shouldDrag gave true once after pressing down on the drawer, we set isAllowedToDrag to true and it will remain true until we let go, there's no reason to disable dragging mid way, ever, and that's the solution to it
+    //   this.isAllowedToDrag$.next(true);
+    //   set(element, {
+    //     transition: 'none',
+    //   });
+    //   set(this.overlayRef$.value, {
+    //     transition: 'none',
+    //   });
+    //   if (isDraggingInDirection) {
+    //     const dampenedDraggedDistance = this.dampenValue(draggedDistance);
+    //     const translateValue = Math.min(dampenedDraggedDistance * -1, 0) * directionMultiplier;
+    //     set(element, {
+    //       transform: isVertical(direction)
+    //         ? `translate3d(0, ${translateValue}px, 0)`
+    //         : `translate3d(${translateValue}px, 0, 0)`,
+    //     });
+    //     return;
+    //   }
+    //   if (wrapper && this.overlayRef$.value) {
+    //     // Calculate percentageDragged as a fraction (0 to 1)
+    //     const scaleValue = Math.min(this.getScale() + percentageDragged * (1 - this.getScale()), 1);
+    //     const borderRadiusValue = 8 - percentageDragged * 8;
+    //     const translateValue = Math.max(0, 14 - percentageDragged * 14);
+    //     set(
+    //       wrapper,
+    //       {
+    //         borderRadius: `${borderRadiusValue}px`,
+    //         transform: `scale(${scaleValue}) translate3d(0, ${translateValue}px, 0)`,
+    //         transition: 'none',
+    //       },
+    //       true,
+    //     );
+    //   }
+    //   const translateValue = absDraggedDistance * directionMultiplier;
+    //   set(element, {
+    //     transform: `translate3d(0, ${translateValue}px, 0)`,
+    //   });
+    //   this.currentPointerPosition$.next({
+    //     y: event.clientY,
+    //   });
+    //   const dragDelta = this.calculateDragDelta();
+    //   const currentTransform = dragDelta;
+    //   if (dragDelta <= 0) {
+    //     return;
+    //   }
+    //   // Apply transform directly
+    //   element.style.transform = `translateY(${currentTransform}px)`;
+    //   element.style.transition = 'none';
+    // }
+  }
+  shouldDrag(el: EventTarget, isDraggingInDirection: boolean, direction: DrawerDirectionType) {
+    let element = el as HTMLElement;
+    const drawer = this.drawerRef$.value;
+    const highlightedText = window.getSelection()?.toString();
+    const swipeAmount = drawer ? this.getTranslate(drawer, direction) : null;
+    const date = new Date();
+    // Fixes https://github.com/emilkowalski/vaul/issues/483
+    if (element.tagName === 'SELECT') {
+      return false;
+    }
 
-  onDrag(event: PointerEvent) {
-    if (!this.drawerRefSubject.value || !this.isDraggingSubject.value) return;
-    
-    this.currentPointerPositionSubject.next({
-      x: event.clientX,
-      y: event.clientY
+    if (element.hasAttribute('data-vaul-no-drag') || element.closest('[data-vaul-no-drag]')) {
+      return false;
+    }
+    // Allow scrolling when animating
+    if (this.openTime$.value && date.getTime() - this.openTime$.value.getTime() < 500) {
+      return false;
+    }
+
+    if (swipeAmount !== null) {
+      if (direction === 'bottom' ? swipeAmount > 0 : swipeAmount < 0) {
+        return true;
+      }
+    }
+
+    // Don't drag if there's highlighted text
+    if (highlightedText && highlightedText.length > 0) {
+      return false;
+    }
+
+    // Disallow dragging if drawer was scrolled within `scrollLockTimeout`
+    if (
+      this.lastTimeDragPrevented &&
+      date.getTime() - this.lastTimeDragPrevented.getTime() < SCROLL_LOCK_TIMEOUT &&
+      swipeAmount === 0
+    ) {
+      this.lastTimeDragPrevented = date;
+      return false;
+    }
+
+    if (isDraggingInDirection) {
+      this.lastTimeDragPrevented = date;
+
+      // We are dragging down so we should allow scrolling
+      return false;
+    }
+
+    // Keep climbing up the DOM tree as long as there's a parent
+    while (element) {
+      // Check if the element is scrollable
+      if (element.scrollHeight > element.clientHeight) {
+        if (element.scrollTop !== 0) {
+          this.lastTimeDragPrevented = new Date();
+
+          // The element is scrollable and not scrolled to the top, so don't drag
+          return false;
+        }
+
+        if (element.getAttribute('role') === 'dialog') {
+          return true;
+        }
+      }
+
+      // Move up to the parent element
+      element = element.parentNode as HTMLElement;
+    }
+
+    // No scrollable parents not scrolled to the top found, so drag
+    return true;
+  }
+  closeDrawer(drawer: HTMLDivElement) {
+    if (!drawer) return;
+    this.cancelDrag(drawer);
+    this.isOpen$.next(false);
+    // Animate to bottom of screen
+    set(drawer, {
+      transform: isVertical(this.direction$.value)
+        ? `translateY(${window.innerHeight}px)`
+        : `translateX(${window.innerWidth}px)`,
+      transition: `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
     });
 
-    const dragDelta = this.calculateDragDelta();
-    const drawer = this.drawerRefSubject.value;
-    const currentTransform = dragDelta;
-    
-    // Apply transform directly
-    drawer.style.transform = `translateY(${currentTransform}px)`;
-    drawer.style.transition = 'none';
-    
-    this.snapPointsService.onDrag({
-      draggedDistance: dragDelta,
-      currentOffset: currentTransform
-    });
+    // Wait for animation to complete before setting isOpen to false
+    // setTimeout(() => {
+    //   this.setIsOpen(false);
+    //   set(drawer, {
+    //     transform: 'none',
+    //     transition: 'none',
+    //   });
+    // }, TRANSITIONS.DURATION * 100
   }
 
-  closeDrawer() {
-    this.setIsOpen(false);
+  getScale() {
+    return (window.innerWidth - WINDOW_TOP_OFFSET) / window.innerWidth;
   }
 
-  setSnapPoints(points: number[] | undefined) {
-    this.snapPointsService.setSnapPoints(points);
-  }
-
-  private calculateDragDelta(): number {
-    const start = this.dragStartPositionSubject.value;
-    const current = this.currentPointerPositionSubject.value;
+  public calculateDragDelta(startPoint?: number, currentPoint?: number): number {
+    const start = startPoint ?? this.dragStartPosition$.value?.y;
+    const current = currentPoint ?? this.currentPointerPosition$.value?.y;
     if (!start || !current) return 0;
 
-    return isVertical(this.directionSubject.value)
-      ? current.y - start.y
-      : current.x - start.x;
-  }
-
-  private calculateVelocity(event: PointerEvent): number {
-    const start = this.dragStartPositionSubject.value;
-    if (!start) return 0;
-
-    const deltaY = event.clientY - start.y;
-    const deltaTime = event.timeStamp - event.timeStamp; // Need to store start time
-    return Math.abs(deltaY / deltaTime);
+    return current - start;
   }
 
   shouldScaleBackground() {
-    return this.shouldScaleBackgroundSubject.value;
+    return this.shouldScaleBackground$.value;
   }
 
   setBackgroundColorOnScale() {
-    return this.setBackgroundColorOnScaleSubject.value;
+    return this.setBackgroundColorOnScale$.value;
   }
 
   noBodyStyles() {
-    return this.noBodyStylesSubject.value;
+    return this.noBodyStyles$.value;
   }
 
   setScaleBackground(value: boolean) {
-    this.shouldScaleBackgroundSubject.next(value);
+    this.shouldScaleBackground$.next(value);
   }
 
   setBackgroundColor(value: boolean) {
-    this.setBackgroundColorOnScaleSubject.next(value);
+    this.setBackgroundColorOnScale$.next(value);
   }
 
   setNoBodyStyles(value: boolean) {
-    this.noBodyStylesSubject.next(value);
+    this.noBodyStyles$.next(value);
   }
 
   // Add getters
   nested() {
-    return this.nestedSubject.value;
+    return this.nested$.value;
   }
 
   modal() {
-    return this.modalSubject.value;
+    return this.modal$.value;
   }
 
   hasBeenOpened() {
-    return this.hasBeenOpenedSubject.value;
+    return this.hasBeenOpened$.value;
   }
 
   preventScrollRestoration() {
-    return this.preventScrollRestorationSubject.value;
+    return this.preventScrollRestoration$.value;
   }
 
   // Add setters
   setNested(value: boolean) {
-    this.nestedSubject.next(value);
+    this.nested$.next(value);
   }
 
   setModal(value: boolean) {
-    this.modalSubject.next(value);
+    this.modal$.next(value);
   }
 
   setHasBeenOpened(value: boolean) {
-    this.hasBeenOpenedSubject.next(value);
+    this.hasBeenOpened$.next(value);
   }
 
   setPreventScrollRestoration(value: boolean) {
-    this.preventScrollRestorationSubject.next(value);
+    this.preventScrollRestoration$.next(value);
+  }
+
+  private cancelDrag(element: HTMLDivElement) {
+    if (!this.isDragging$.value || !element) return;
+
+    element.classList.remove(DRAG_CLASS);
+    this.isDragging$.next(false);
+    this.dragEndTime$.next(new Date());
+  }
+
+  public getTranslate(element: HTMLElement, direction: DrawerDirectionType) {
+    if (!element) {
+      return null;
+    }
+    const style = window.getComputedStyle(element);
+    const transform =
+      // @ts-ignore
+      style.transform || style.webkitTransform || style.mozTransform;
+    let mat = transform.match(/^matrix3d\((.+)\)$/);
+    if (mat) {
+      // https://developer.mozilla.org/en-US/docs/Web/CSS/transform-function/matrix3d
+      return parseFloat(mat[1].split(', ')[13]);
+    }
+    // https://developer.mozilla.org/en-US/docs/Web/CSS/transform-function/matrix
+    mat = transform.match(/^matrix\((.+)\)$/);
+    return mat ? parseFloat(mat[1].split(', ')[isVertical(direction) ? 5 : 4]) : null;
+  }
+
+  dampenValue(v: number) {
+    return 8 * (Math.log(v + 1) - 2);
+  }
+
+  assignStyle(element: HTMLElement | null | undefined, style: Partial<CSSStyleDeclaration>) {
+    if (!element) return () => {};
+
+    const prevStyle = element.style.cssText;
+    Object.assign(element.style, style);
+
+    return () => {
+      element.style.cssText = prevStyle;
+    };
   }
 
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
-    this.isOpenSubject.complete();
-    this.isDraggingSubject.complete();
-    this.drawerRefSubject.complete();
-    this.overlayRefSubject.complete();
-    this.directionSubject.complete();
-    this.dragStartPositionSubject.complete();
-    this.shouldScaleBackgroundSubject.complete();
-    this.setBackgroundColorOnScaleSubject.complete();
-    this.noBodyStylesSubject.complete();
-    this.nestedSubject.complete();
-    this.modalSubject.complete();
-    this.hasBeenOpenedSubject.complete();
-    this.preventScrollRestorationSubject.complete();
-    this.currentPointerPositionSubject.complete();
+    this.isOpen$.complete();
+    this.isDragging$.complete();
+    this.drawerRef$.complete();
+    this.overlayRef$.complete();
+    this.direction$.complete();
+    this.dragStartPosition$.complete();
+    this.shouldScaleBackground$.complete();
+    this.setBackgroundColorOnScale$.complete();
+    this.noBodyStyles$.complete();
+    this.nested$.complete();
+    this.modal$.complete();
+    this.hasBeenOpened$.complete();
+    this.preventScrollRestoration$.complete();
+    this.currentPointerPosition$.complete();
   }
-} 
+}

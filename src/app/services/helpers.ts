@@ -1,11 +1,22 @@
-import { AnyFunction, DrawerDirection } from '../types';
+import { AnyFunction } from '../types';
+import { DrawerDirectionType } from './../types';
 
 interface Style {
   [key: string]: string;
 }
 
 const cache = new WeakMap();
-
+const nonTextInputTypes = new Set([
+  'checkbox',
+  'radio',
+  'range',
+  'color',
+  'file',
+  'image',
+  'button',
+  'submit',
+  'reset',
+]);
 export function isInView(el: HTMLElement): boolean {
   const rect = el.getBoundingClientRect();
 
@@ -56,20 +67,7 @@ export function reset(el: Element | HTMLElement | null, prop?: string) {
   }
 }
 
-export const isVertical = (direction: DrawerDirection) => {
-  switch (direction) {
-    case 'top':
-    case 'bottom':
-      return true;
-    case 'left':
-    case 'right':
-      return false;
-    default:
-      return direction satisfies never;
-  }
-};
-
-export function getTranslate(element: HTMLElement, direction: DrawerDirection): number | null {
+export function getTranslate(element: HTMLElement, direction: DrawerDirectionType): number | null {
   if (!element) {
     return null;
   }
@@ -114,4 +112,37 @@ export function chain<T>(...fns: T[]) {
       }
     }
   };
+}
+
+export function isInput(target: Element) {
+  return (
+    (target instanceof HTMLInputElement && !nonTextInputTypes.has(target.type)) ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
+}
+
+export function isVertical(direction: DrawerDirectionType) {
+  return direction === 'top' || direction === 'bottom' ? true : false;
+}
+
+// TODO: Improve typings
+export function requestTimeout(fn: () => void, delay: number, registerCancel: (val: any) => any) {
+  const start = new Date().getTime();
+
+  const loop = () => {
+    const delta = new Date().getTime() - start;
+
+    if (delta >= delay) {
+      fn();
+      registerCancel(() => {});
+      return;
+    }
+
+    const raf = requestAnimationFrame(loop);
+    registerCancel(() => cancelAnimationFrame(raf));
+  };
+
+  const raf = requestAnimationFrame(loop);
+  registerCancel(() => cancelAnimationFrame(raf));
 }

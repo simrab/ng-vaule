@@ -1,63 +1,44 @@
-import { AsyncPipe } from '@angular/common';
-import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, inject, OnDestroy, ViewChild } from '@angular/core';
-import { map, Subject } from 'rxjs';
-import { DrawerService } from './services/drawer.service';
+import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 
 @Component({
   selector: 'vaul-overlay',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div 
+    <div
       class="vaul-overlay"
       #overlayRef
       [attr.data-vaul-overlay]=""
-      [attr.data-state]="(isOpen$| async) ? 'open' : 'closed'"
-      [attr.data-vaul-snap-points]="(hasSnapPoints$| async) ? 'true' : 'false'"
-      (pointerup)="onRelease($event)">
-    </div>
+      [attr.data-state]="isOpen() ? 'open' : 'closed'"
+    ></div>
   `,
-  styles: [`
-    .vaul-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.5);
-      pointer-events: none;
-      z-index: -1;
-      opacity: 0;
-      transition: all 0.3s cubic-bezier(0.32, 0.72, 0, 1);
-    }
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+      .vaul-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        pointer-events: none;
+        z-index: -1;
+        opacity: 0;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        transition: all 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+      }
 
-    .vaul-overlay[data-state='open'] {
-      opacity: 1;
-      pointer-events: auto;
-      z-index: var(--vaul-overlay-z-index, 998);
-    }
-  `],
-  imports: [AsyncPipe]
+      .vaul-overlay[data-state='open'] {
+        opacity: 1;
+        pointer-events: auto;
+        z-index: var(--vaul-overlay-z-index, 998);
+      }
+    `,
+  ],
 })
-export class OverlayComponent implements AfterViewInit, OnDestroy {
-  private readonly drawerService = inject(DrawerService);
-  private readonly destroy$ = new Subject<void>();
-  
-  @ViewChild('overlayRef') overlayRef!: ElementRef<HTMLDivElement>;
-  
-  readonly hasSnapPoints$ = this.drawerService.snapPointsOffset$.pipe(
-    map((offset) => !!offset)
-  );
-
-  readonly isOpen$ = this.drawerService.isOpen$;
-
-  ngAfterViewInit() {
-    this.drawerService.setOverlayRef(this.overlayRef.nativeElement);
-  }
-
-  ngOnDestroy() {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onRelease(event: PointerEvent) {
-    this.drawerService.onRelease(event);
-  }
-} 
+export class OverlayComponent {
+  isOpen = input<boolean>();
+}
