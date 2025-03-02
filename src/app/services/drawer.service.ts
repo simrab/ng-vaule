@@ -377,7 +377,7 @@ export class DrawerService {
   closeDrawer(drawer: HTMLDivElement) {
     if (!drawer) return;
     this.cancelDrag(drawer);
-
+    this.isOpen$.next(false);
     // Animate to bottom of screen
     set(drawer, {
       transform: `translateY(${window.innerHeight}px)`,
