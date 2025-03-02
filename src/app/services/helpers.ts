@@ -56,19 +56,6 @@ export function reset(el: Element | HTMLElement | null, prop?: string) {
   }
 }
 
-export const isVertical = (direction: DrawerDirection) => {
-  switch (direction) {
-    case 'top':
-    case 'bottom':
-      return true;
-    case 'left':
-    case 'right':
-      return false;
-    default:
-      return direction satisfies never;
-  }
-};
-
 export function getTranslate(element: HTMLElement, direction: DrawerDirection): number | null {
   if (!element) {
     return null;
@@ -80,11 +67,11 @@ export function getTranslate(element: HTMLElement, direction: DrawerDirection): 
   let mat = transform.match(/^matrix3d\((.+)\)$/);
   if (mat) {
     // https://developer.mozilla.org/en-US/docs/Web/CSS/transform-function/matrix3d
-    return parseFloat(mat[1].split(', ')[isVertical(direction) ? 13 : 12]);
+    return parseFloat(mat[1].split(', ')[13]);
   }
   // https://developer.mozilla.org/en-US/docs/Web/CSS/transform-function/matrix
   mat = transform.match(/^matrix\((.+)\)$/);
-  return mat ? parseFloat(mat[1].split(', ')[isVertical(direction) ? 5 : 4]) : null;
+  return mat ? parseFloat(mat[1].split(', ')[5]) : null;
 }
 
 export function dampenValue(v: number) {

@@ -3,7 +3,6 @@ import { ChangeDetectionStrategy, Component, ElementRef, inject, input, OnDestro
 import { Subject } from 'rxjs';
 import { take, takeUntil } from 'rxjs/operators';
 import { DrawerService } from './services/drawer.service';
-import { SnapPointsService } from './services/snap-points.service';
 
 @Component({
   selector: 'vaul-handle',
@@ -14,52 +13,49 @@ import { SnapPointsService } from './services/snap-points.service';
       class="vaul-handle"
       #handleRef
       [attr.data-vaul-handle]=""
-      [attr.data-vaul-drawer-visible]="(isOpen$| async) ? 'true' : 'false'"
-      [class.vaul-dragging]="(isDragging$| async)"
+      [attr.data-vaul-drawer-visible]="(isOpen$ | async) ? 'true' : 'false'"
+      [class.vaul-dragging]="isDragging$ | async"
       (pointerdown)="onPointerDown($event)"
       (pointermove)="onPointerMove($event)"
       (pointerup)="onPointerUp($event)"
       (pointercancel)="onPointerCancel($event)"
       aria-hidden="true"
     >
-      <span 
-        class="vaul-handle-hitarea" 
-        [class.vaul-handle-disabled]="disabled()"
-        aria-hidden="true"
-      >
+      <span class="vaul-handle-hitarea" [class.vaul-handle-disabled]="disabled()" aria-hidden="true">
         <ng-content></ng-content>
       </span>
     </div>
   `,
   imports: [AsyncPipe],
-  styles: [`
-    .vaul-handle {
-      width: 100%;
-      user-select: none;
-      touch-action: none;
-      cursor: grab;
-    }
+  styles: [
+    `
+      .vaul-handle {
+        width: 100%;
+        user-select: none;
+        touch-action: none;
+        cursor: grab;
+      }
 
-    .vaul-handle-hitarea {
-      width: 100%;
-      height: 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
+      .vaul-handle-hitarea {
+        width: 100%;
+        height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
 
-    .vaul-handle.vaul-dragging {
-      cursor: grabbing;
-    }
+      .vaul-handle.vaul-dragging {
+        cursor: grabbing;
+      }
 
-    .vaul-handle-disabled {
-      pointer-events: none;
-    }
-  `]
+      .vaul-handle-disabled {
+        pointer-events: none;
+      }
+    `,
+  ],
 })
 export class HandleComponent implements OnDestroy {
   private readonly drawerService = inject(DrawerService);
-  private readonly snapPointsService = inject(SnapPointsService);
   private readonly destroy$ = new Subject<void>();
 
   // Create computed signals from observables
@@ -68,26 +64,17 @@ export class HandleComponent implements OnDestroy {
   readonly direction$ = this.drawerService.direction$;
 
   readonly disabled = input(false);
-  
+
   @ViewChild('handleRef') handleRef!: ElementRef<HTMLDivElement>;
 
-  private initialSnapPoint: number | null = null;
-
-  constructor() {
-    // Subscribe to activeSnapPointIndex$
-    this.snapPointsService.activeSnapPointIndex$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(index => {
-        this.initialSnapPoint = index;
-      });
-  }
+  public drawerRef = input.required<HTMLDivElement>();
 
   onPointerDown(event: PointerEvent) {
     if (this.disabled()) return;
 
     // Capture the pointer to ensure all events go to this element
     this.handleRef.nativeElement.setPointerCapture(event.pointerId);
-    
+
     // Start dragging
     this.drawerService.onPress(event);
   }
@@ -95,11 +82,7 @@ export class HandleComponent implements OnDestroy {
   onPointerMove(event: PointerEvent) {
     if (this.disabled()) return;
     // Only handle move if we're dragging
-    let isDragging = false;
-    this.drawerService.isDragging$.pipe(
-      take(1)
-    ).subscribe(dragging => isDragging = dragging as boolean);
-    if (!isDragging) return;
+    let isDragging = this.drawerService.isDragging$.value;
 
     // Prevent default to avoid text selection
     event.preventDefault();
@@ -114,7 +97,7 @@ export class HandleComponent implements OnDestroy {
     this.handleRef.nativeElement.releasePointerCapture(event.pointerId);
 
     // End dragging
-    this.drawerService.onRelease(event);
+    this.drawerService.onRelease(event, this.drawerRef());
   }
 
   onPointerCancel(event: PointerEvent) {
@@ -124,11 +107,11 @@ export class HandleComponent implements OnDestroy {
     this.handleRef.nativeElement.releasePointerCapture(event.pointerId);
 
     // End dragging
-    this.drawerService.onRelease(event);
+    this.drawerService.onRelease(event, this.drawerRef());
   }
 
   ngOnDestroy() {
     this.destroy$.next();
     this.destroy$.complete();
   }
-} 
+}

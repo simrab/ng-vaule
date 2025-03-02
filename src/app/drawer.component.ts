@@ -1,60 +1,87 @@
 import { AsyncPipe } from '@angular/common';
-import { AfterViewInit, ChangeDetectionStrategy, Component, effect, ElementRef, inject, input, OnDestroy, output, signal, viewChild } from '@angular/core';
+import {
+  AfterViewInit,
+  ChangeDetectionStrategy,
+  Component,
+  effect,
+  ElementRef,
+  inject,
+  input,
+  model,
+  OnDestroy,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { Subject } from 'rxjs';
+import { HandleComponent } from './handle.component';
+import { DOUBLE_TAP_TIMEOUT, DRAG_CLASS, TRANSITIONS } from './services/constants';
 import { DrawerService } from './services/drawer.service';
 import { DrawerDirection } from './types';
+import { set } from './services/helpers';
 
 @Component({
   selector: 'vaul-drawer',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div 
+    <div
       class="vaul-drawer"
       #drawerRef
+      (click)="handleStartCycle(drawerRef)"
       [attr.data-vaul-drawer]=""
       [attr.data-vaul-drawer-direction]="direction()"
-      [attr.data-state]="(isOpen$| async) ? 'open' : 'closed'"
+      [attr.data-state]="(isOpen$ | async) ? 'open' : 'closed'"
       [attr.data-vaul-snap-points]="!!snapPoints() ? 'true' : 'false'"
       [style.height]="drawerHeight()"
-      (pointerdown)="onPress($event)"
-      (pointermove)="onDrag($event)"
-      (pointerup)="onRelease($event)"
-      (pointercancel)="onRelease($event)">
-      <ng-content></ng-content>
+      (drag)="onDrag($event, drawerRef)"
+      (pointerdown)="onPointerDown($event, drawerRef)"
+      (pointermove)="onPointerMove($event, drawerRef)"
+      (pointerout)="onPointerOut(drawerRef)"
+      (pointerup)="onPointerUp($event, drawerRef)"
+      (pointercancel)="onRelease($event, drawerRef)"
+      (contextmenu)="onContextMenu(drawerRef)"
+    >
+      <div class="drawer-content">
+        <vaul-handle [drawerRef]="drawerRef">
+          <div class="handle-indicator"></div>
+        </vaul-handle>
+        <ng-content></ng-content>
+      </div>
     </div>
   `,
-  styles: [`
-    :host {
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      z-index: var(--vaul-drawer-z-index, 999);
-      display: flex;
-      flex-direction: column;
-      pointer-events: none;
-      transform-origin: bottom center;
-      height: 100%;
-    }
+  styles: [
+    `
+      :host {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: var(--vaul-drawer-z-index, 999);
+        display: flex;
+        flex-direction: column;
+        pointer-events: none;
+        transform-origin: bottom center;
+        height: 100%;
+      }
 
-    .vaul-drawer {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      width: 100%;
-      height: auto;
-      overflow: hidden;
-      pointer-events: auto;
-      background: white;
-      border-radius: 8px 8px 0 0;
-      will-change: transform;
-      transform-origin: bottom center;
-    }
-
-  `],
-  imports: [AsyncPipe]
+      .vaul-drawer {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        height: auto;
+        overflow: hidden;
+        pointer-events: auto;
+        background: white;
+        border-radius: 8px 8px 0 0;
+        will-change: transform;
+        transform-origin: bottom center;
+      }
+    `,
+  ],
+  imports: [AsyncPipe, HandleComponent],
 })
 export class DrawerComponent implements AfterViewInit, OnDestroy {
   private readonly drawerService = inject(DrawerService);
@@ -68,39 +95,36 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
   readonly nested = input(false);
   readonly repositionInputs = input(true);
   readonly autoFocus = input(false);
-  readonly snapPoints = input<number[] | undefined>(undefined);
+  readonly snapPoints = model<number[] | undefined>(undefined);
 
   readonly openChange = output<boolean>();
-  
+
   drawerRef = viewChild<ElementRef<HTMLDivElement>>('drawerRef');
 
   private readonly initialDrawerHeight = signal<number | null>(null);
   private readonly keyboardIsOpen = signal(false);
   private readonly previousDiffFromInitial = signal(0);
-  readonly drawerHeight = signal<string | null>(null);
+  drawerHeight = signal<string | null>(null);
 
-  readonly isOpen$ = this.drawerService.isOpen$;
+  isOpen$ = this.drawerService.isOpen$;
+  lastKnownPointerEventRef: PointerEvent | null = null;
+  shouldCancelInteraction: any;
+  preventCycle: boolean = false;
+  activeSnapPoint: any;
 
   constructor() {
+    this.drawerService.openTime$.next(new Date());
     // Watch open state
     effect(() => {
       const isOpen = this.open();
       this.drawerService.setIsOpen(isOpen);
     });
 
-    // Watch other inputs
     effect(() => {
       this.drawerService.setDirection(this.direction());
       this.drawerService.setScaleBackground(this.shouldScaleBackground());
       this.drawerService.setModal(this.modal());
       this.drawerService.setNested(this.nested());
-    });
-
-    // Watch snap points
-    effect(() => {
-      if (this.snapPoints()) {
-        this.drawerService.setSnapPoints(this.snapPoints());
-      }
     });
 
     // Setup visual viewport handling
@@ -132,10 +156,12 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
     const totalHeight = window.innerHeight;
     const diffFromInitial = totalHeight - visualViewportHeight;
     const drawerHeight = this.drawerRef()?.nativeElement.getBoundingClientRect().height ?? 0;
+    this.drawerService.drawerHeight$.next(drawerHeight);
     const isTallEnough = drawerHeight > totalHeight * 0.8;
 
     if (!this.initialDrawerHeight()) {
       this.initialDrawerHeight.set(drawerHeight);
+      this.drawerService.drawerHeight$.next(drawerHeight);
     }
 
     if (Math.abs(this.previousDiffFromInitial() - diffFromInitial) > 60) {
@@ -153,9 +179,10 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
       if (drawerHeight > visualViewportHeight) {
         newHeight = visualViewportHeight - (isTallEnough ? offsetFromTop ?? 0 : 0);
       }
-
       this.drawerHeight.set(`${Math.max(newHeight, visualViewportHeight - (offsetFromTop ?? 0))}px`);
+      this.drawerService.drawerHeight$.next(Math.max(newHeight, visualViewportHeight - (offsetFromTop ?? 0)));
     } else {
+      this.drawerService.drawerHeight$.next(this.initialDrawerHeight());
       this.drawerHeight.set(`${this.initialDrawerHeight()}px`);
     }
   }
@@ -168,7 +195,39 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
       (element instanceof HTMLElement && element.isContentEditable)
     );
   }
+  handleStartCycle(element: HTMLDivElement) {
+    // Stop if this is the second click of a double click
+    if (this.shouldCancelInteraction) {
+      this.handleCancelInteraction();
+      return;
+    }
+    window.setTimeout(() => {
+      this.handleCycleSnapPoints(element);
+    }, DOUBLE_TAP_TIMEOUT);
+  }
+  handleStartInteraction() {
+    this.shouldCancelInteraction = true;
+  }
+  handleCancelInteraction() {
+    this.shouldCancelInteraction = false;
+  }
+  handleCycleSnapPoints(element: HTMLDivElement) {
+    // Prevent accidental taps while resizing drawer
+    if (this.drawerService.isDragging$.value || this.preventCycle || this.shouldCancelInteraction) {
+      this.handleCancelInteraction();
+      return;
+    }
+    // Make sure to clear the timeout id if the user releases the handle before the cancel timeout
+    this.handleCancelInteraction();
 
+    if (!this.snapPoints() || this.snapPoints()?.length === 0) {
+      if (!this.dismissible()) {
+        this;
+        this.drawerService.closeDrawer(element);
+      }
+      return;
+    }
+  }
   private readonly nonTextInputTypes = new Set([
     'checkbox',
     'radio',
@@ -182,11 +241,19 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
   ]);
 
   ngAfterViewInit() {
-    if (this.drawerRef()?.nativeElement) {
-      this.drawerService.setDrawerRef(this.drawerRef()?.nativeElement || null);
+    const drawerRef = this.drawerRef();
+    if (!drawerRef) return;
+    if (drawerRef.nativeElement) {
+      this.drawerService.setDrawerRef(drawerRef.nativeElement || null);
+      const offset = drawerRef.nativeElement.getBoundingClientRect().height || 0;
+      const transform = `translateY(${offset}px)`;
+      set(drawerRef.nativeElement, {
+        transition: `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
+        transform,
+      });
     }
     if (this.direction()) {
-      this.drawerService.snapPointsService.setDirection(this.direction());
+      this.drawerService.setDirection(this.direction());
     }
   }
 
@@ -196,15 +263,79 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
     this.drawerService.setDrawerRef(null);
   }
 
-  onPress(event: PointerEvent) {
-    this.drawerService.onPress(event);
+  onPointerDown(event: PointerEvent, element: HTMLDivElement) {
+    this.drawerService.pointerStart$.next({ y: event.pageY });
+    this.onPress(event, element);
+  }
+  onPointerUp(event: PointerEvent, element: HTMLDivElement) {
+    this.drawerService.pointerStart$.next(null);
+    this.drawerService.wasBeyondThePoint$.next(false);
+    this.onRelease(event, element);
+  }
+  onPointerMove(event: PointerEvent, element: HTMLDivElement) {
+    this.lastKnownPointerEventRef = event;
+    if (!this.drawerService.pointerStart$.value) return;
+    const yPosition = event.pageY - this.drawerService.pointerStart$.value.y;
+
+    const swipeStartThreshold: number = event.pointerType === 'touch' ? 10 : 2;
+    const delta = { y: yPosition };
+    const direction = yPosition > 0 ? 'bottom' : 'top';
+
+    const isAllowedToSwipe = this.isDeltaInDirection(delta, direction, swipeStartThreshold);
+    if (isAllowedToSwipe) this.onDrag(event, element);
+    else if (Math.abs(yPosition) > swipeStartThreshold) {
+      this.drawerService.pointerStart$.next(null);
+    }
+  }
+  onPointerOut(element: HTMLDivElement) {
+    this.handleOnPointerUp(this.lastKnownPointerEventRef, element);
   }
 
-  onDrag(event: PointerEvent) {
-    this.drawerService.onDrag(event);
+  private isDeltaInDirection(delta: { y: number }, direction: string, threshold = 0) {
+    if (this.drawerService.wasBeyondThePoint$.value) return true;
+
+    const deltaY = Math.abs(delta.y);
+    const dFactor = ['bottom'].includes(direction) ? 1 : -1;
+
+    const isReverseDirection = delta.y * dFactor < 0;
+    if (!isReverseDirection && deltaY >= 0 && deltaY <= threshold) {
+      return false;
+    }
+
+    this.drawerService.wasBeyondThePoint$.next(true);
+    return true;
   }
 
-  onRelease(event: PointerEvent) {
-    this.drawerService.onRelease(event);
+  onContextMenu(element: HTMLDivElement) {
+    if (this.lastKnownPointerEventRef) {
+      this.handleOnPointerUp(this.lastKnownPointerEventRef, element);
+    }
   }
-} 
+  onPress(event: PointerEvent, element: HTMLDivElement) {
+    this.drawerService.isDragging$.next(true);
+    this.drawerService.onPress(event, element);
+  }
+
+  onDrag(event: DragEvent | PointerEvent, element: HTMLDivElement) {
+    this.drawerService.onDrag(event, element);
+  }
+
+  cancelDrag(element?: HTMLDivElement) {
+    if (!this.drawerService.isDragging$.value || !element) return;
+    element.classList.remove(DRAG_CLASS);
+    this.drawerService.isAllowedToDrag$.next(false);
+    this.drawerService.isDragging$.next(false);
+    this.drawerService.dragEndTime$.next(new Date());
+  }
+  onRelease(event: PointerEvent, element: HTMLDivElement) {
+    this.drawerService.isDragging$.next(false);
+    this.drawerService.isAllowedToDrag$.next(false);
+    this.drawerService.onRelease(event, element);
+  }
+  private handleOnPointerUp(event: PointerEvent | null, element: HTMLDivElement) {
+    if (!event) return;
+    this.drawerService.pointerStart$.next(null);
+    this.drawerService.wasBeyondThePoint$.next(false);
+    this.onRelease(event, element);
+  }
+}

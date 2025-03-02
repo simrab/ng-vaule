@@ -1,13 +1,12 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { DrawerComponent } from './drawer.component';
-import { HandleComponent } from './handle.component';
 import { OverlayComponent } from './overlay.component';
 import { DrawerService } from './services/drawer.service';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [DrawerComponent, OverlayComponent, HandleComponent],
+  imports: [DrawerComponent, OverlayComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <button 
@@ -22,9 +21,6 @@ import { DrawerService } from './services/drawer.service';
       (openChange)="setIsOpen($event)"
       [snapPoints]="[0, 150]">
       <div class="drawer-content">
-        <vaul-handle>
-          <div class="handle-indicator"></div>
-        </vaul-handle>
         <div class="content">
           <h2>Drawer Example</h2>
           <p>This is a drawer with snap points at 50% and 80% of the screen height.</p>
