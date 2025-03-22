@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject, EMPTY, Observable, Subject, combineLatest, map, of, switchMap, takeUntil } from 'rxjs';
 import { DrawerDirection } from '../types';
 import {
+  BORDER_RADIUS,
   CLOSE_THRESHOLD,
   DRAG_CLASS,
   SCROLL_LOCK_TIMEOUT,
@@ -195,6 +196,10 @@ export class DrawerService {
     if (dragDelta <= 0) {
       return;
     }
+    if (this.direction$.value === 'bottom' ? distMoved > 0 : distMoved < 0) {
+      this.resetDrawer();
+      return;
+    }
     // Coordinate release behavior with snap points
     if (velocity > VELOCITY_THRESHOLD) {
       this.closeDrawer(element);
@@ -207,8 +212,40 @@ export class DrawerService {
       this.dragStartPosition$.next(null);
       return;
     }
+    this.resetDrawer();
   }
+  resetDrawer(element?: HTMLDivElement) {
+    if (!element) return;
+    const wrapper = document.querySelector('[data-vaul-drawer-wrapper]');
+    const currentSwipeAmount = this.getTranslate(element, this.direction$.value);
 
+    set(element, {
+      transform: 'translate3d(0, 0, 0)',
+      transition: `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
+    });
+
+    set(this.overlayRef$.value, {
+      transition: `opacity ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
+      opacity: '1',
+    });
+
+    // Don't reset background if swiped upwards
+    if (this.shouldScaleBackground$.value && currentSwipeAmount && currentSwipeAmount > 0 && this.isOpen$.value) {
+      set(
+        wrapper,
+        {
+          borderRadius: `${BORDER_RADIUS}px`,
+          overflow: 'hidden',
+          transform: `scale(${this.getScale()}) translate3d(0, calc(env(safe-area-inset-top) + 14px), 0)`,
+          transformOrigin: 'top',
+          transitionProperty: 'transform, border-radius',
+          transitionDuration: `${TRANSITIONS.DURATION}s`,
+          transitionTimingFunction: `cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
+        },
+        true,
+      );
+    }
+  }
   onDrag(event: DragEvent | PointerEvent, element?: HTMLDivElement, dismissible: boolean = true) {
     const direction = this.direction$.value;
 

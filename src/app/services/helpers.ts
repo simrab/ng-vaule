@@ -5,7 +5,17 @@ interface Style {
 }
 
 const cache = new WeakMap();
-
+const nonTextInputTypes = new Set([
+  'checkbox',
+  'radio',
+  'range',
+  'color',
+  'file',
+  'image',
+  'button',
+  'submit',
+  'reset',
+]);
 export function isInView(el: HTMLElement): boolean {
   const rect = el.getBoundingClientRect();
 
@@ -101,4 +111,12 @@ export function chain<T>(...fns: T[]) {
       }
     }
   };
+}
+
+export function isInput(target: Element) {
+  return (
+    (target instanceof HTMLInputElement && !nonTextInputTypes.has(target.type)) ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
 }

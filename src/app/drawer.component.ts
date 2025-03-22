@@ -15,10 +15,11 @@ import {
 } from '@angular/core';
 import { Subject } from 'rxjs';
 import { HandleComponent } from './handle.component';
-import { DOUBLE_TAP_TIMEOUT, DRAG_CLASS, TRANSITIONS } from './services/constants';
+import { DOUBLE_TAP_TIMEOUT, DRAG_CLASS, TRANSITIONS, WINDOW_TOP_OFFSET } from './services/constants';
 import { DrawerService } from './services/drawer.service';
+import { isInput, set } from './services/helpers';
 import { DrawerDirection } from './types';
-import { set } from './services/helpers';
+import { isMobileFirefox } from './services/browser';
 
 @Component({
   selector: 'vaul-drawer',
@@ -84,6 +85,7 @@ import { set } from './services/helpers';
   imports: [AsyncPipe, HandleComponent],
 })
 export class DrawerComponent implements AfterViewInit, OnDestroy {
+fixed = input(true);
   private readonly drawerService = inject(DrawerService);
   private readonly destroy$ = new Subject<void>();
 
@@ -130,71 +132,111 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
     // Setup visual viewport handling
     this.setupVisualViewport();
   }
+  private onVisualViewportChange() {
+    const drawer = this.drawerRef()?.nativeElement;
+    if (!drawer) return;
+    const focusedElement = document.activeElement as HTMLElement;
+    if (isInput(focusedElement) || this.keyboardIsOpen()) {
+      const visualViewportHeight = window.visualViewport?.height || 0;
+      const totalHeight = window.innerHeight;
+      // This is the height of the keyboard
+      let diffFromInitial = totalHeight - visualViewportHeight;
+      const drawerHeight = drawer.getBoundingClientRect().height || 0;
+      // Adjust drawer height only if it's tall enough
+      const isTallEnough = drawerHeight > totalHeight * 0.8;
+
+      if (!this.initialDrawerHeight()) {
+        this.initialDrawerHeight.set(drawerHeight);
+      }
+      const offsetFromTop = drawer.getBoundingClientRect().top;
+
+      // visualViewport height may change due to somq e subtle changes to the keyboard. Checking if the height changed by 60 or more will make sure that they keyboard really changed its open state.
+      if (Math.abs(this.previousDiffFromInitial() - diffFromInitial) > 60) {
+        this.keyboardIsOpen.set(!this.keyboardIsOpen());
+      }
+      const snapPoints = this.snapPoints();
+      this.previousDiffFromInitial.set(diffFromInitial);
+      // We don't have to change the height if the input is in view, when we are here we are in the opened keyboard state so we can correctly check if the input is in view
+      if (drawerHeight > visualViewportHeight || this.keyboardIsOpen()) {
+        const height = drawer.getBoundingClientRect().height;
+        let newDrawerHeight = height;
+
+        if (height > visualViewportHeight) {
+          newDrawerHeight = visualViewportHeight - (isTallEnough ? offsetFromTop : WINDOW_TOP_OFFSET);
+        }
+        // When fixed, don't move the drawer upwards if there's space, but rather only change it's height so it's fully scrollable when the keyboard is open
+        if (this.fixed()) {
+          drawer.style.height = `${height - Math.max(diffFromInitial, 0)}px`;
+        } else {
+          drawer.style.height = `${Math.max(newDrawerHeight, visualViewportHeight - offsetFromTop)}px`;
+        }
+      } else if (!isMobileFirefox()) {
+        drawer.style.height = `${this.initialDrawerHeight()}px`;
+      }
+
+      if (snapPoints && snapPoints.length > 0 && !this.keyboardIsOpen()) {
+        drawer.style.bottom = `0px`;
+      } else {
+        // Negative bottom value would never make sense
+        drawer.style.bottom = `${Math.max(diffFromInitial, 0)}px`;
+      }
+    }
+  }
 
   private setupVisualViewport() {
     if (typeof window === 'undefined' || !window.visualViewport || !this.repositionInputs()) {
       return;
     }
-
-    const onVisualViewportChange = () => {
-      if (!this.drawerRef()?.nativeElement) return;
-
-      const focusedElement = document.activeElement as HTMLElement;
-      if (this.isInput(focusedElement) || this.keyboardIsOpen()) {
-        this.handleInputFocus();
-      }
-    };
-
-    window.visualViewport.addEventListener('resize', onVisualViewportChange);
+    window.visualViewport.addEventListener('resize', this.onVisualViewportChange);
     this.destroy$.subscribe(() => {
-      window.visualViewport?.removeEventListener('resize', onVisualViewportChange);
+      window.visualViewport?.removeEventListener('resize', this.onVisualViewportChange);
     });
   }
 
-  private handleInputFocus() {
-    const visualViewportHeight = window.visualViewport?.height || 0;
-    const totalHeight = window.innerHeight;
-    const diffFromInitial = totalHeight - visualViewportHeight;
-    const drawerHeight = this.drawerRef()?.nativeElement.getBoundingClientRect().height ?? 0;
-    this.drawerService.drawerHeight$.next(drawerHeight);
-    const isTallEnough = drawerHeight > totalHeight * 0.8;
+  // private handleInputFocus() {
+  //   const visualViewportHeight = window.visualViewport?.height || 0;
+  //   const totalHeight = window.innerHeight;
+  //   const diffFromInitial = totalHeight - visualViewportHeight;
+  //   const drawerHeight = this.drawerRef()?.nativeElement.getBoundingClientRect().height ?? 0;
+  //   this.drawerService.drawerHeight$.next(drawerHeight);
+  //   const isTallEnough = drawerHeight > totalHeight * 0.8;
 
-    if (!this.initialDrawerHeight()) {
-      this.initialDrawerHeight.set(drawerHeight);
-      this.drawerService.drawerHeight$.next(drawerHeight);
-    }
+  //   if (!this.initialDrawerHeight()) {
+  //     this.initialDrawerHeight.set(drawerHeight);
+  //     this.drawerService.drawerHeight$.next(drawerHeight);
+  //   }
 
-    if (Math.abs(this.previousDiffFromInitial() - diffFromInitial) > 60) {
-      this.keyboardIsOpen.set(!this.keyboardIsOpen());
-    }
+  //   if (Math.abs(this.previousDiffFromInitial() - diffFromInitial) > 60) {
+  //     this.keyboardIsOpen.set(!this.keyboardIsOpen());
+  //   }
 
-    this.previousDiffFromInitial.set(diffFromInitial);
-    this.updateDrawerHeight(drawerHeight, visualViewportHeight, isTallEnough);
-  }
+  //   this.previousDiffFromInitial.set(diffFromInitial);
+  //   this.updateDrawerHeight(drawerHeight, visualViewportHeight, isTallEnough);
+  // }
 
-  private updateDrawerHeight(drawerHeight: number, visualViewportHeight: number, isTallEnough: boolean) {
-    if (drawerHeight > visualViewportHeight || this.keyboardIsOpen()) {
-      const offsetFromTop = this.drawerRef()?.nativeElement.getBoundingClientRect().top;
-      let newHeight = drawerHeight;
-      if (drawerHeight > visualViewportHeight) {
-        newHeight = visualViewportHeight - (isTallEnough ? offsetFromTop ?? 0 : 0);
-      }
-      this.drawerHeight.set(`${Math.max(newHeight, visualViewportHeight - (offsetFromTop ?? 0))}px`);
-      this.drawerService.drawerHeight$.next(Math.max(newHeight, visualViewportHeight - (offsetFromTop ?? 0)));
-    } else {
-      this.drawerService.drawerHeight$.next(this.initialDrawerHeight());
-      this.drawerHeight.set(`${this.initialDrawerHeight()}px`);
-    }
-  }
+  // private updateDrawerHeight(drawerHeight: number, visualViewportHeight: number, isTallEnough: boolean) {
+  //   if (drawerHeight > visualViewportHeight || this.keyboardIsOpen()) {
+  //     const offsetFromTop = this.drawerRef()?.nativeElement.getBoundingClientRect().top;
+  //     let newHeight = drawerHeight;
+  //     if (drawerHeight > visualViewportHeight) {
+  //       newHeight = visualViewportHeight - (isTallEnough ? (offsetFromTop ?? 0) : 0);
+  //     }
+  //     this.drawerHeight.set(`${Math.max(newHeight, visualViewportHeight - (offsetFromTop ?? 0))}px`);
+  //     this.drawerService.drawerHeight$.next(Math.max(newHeight, visualViewportHeight - (offsetFromTop ?? 0)));
+  //   } else {
+  //     this.drawerService.drawerHeight$.next(this.initialDrawerHeight());
+  //     this.drawerHeight.set(`${this.initialDrawerHeight()}px`);
+  //   }
+  // }
 
-  private isInput(element: Element | null): boolean {
-    if (!element) return false;
-    return (
-      (element instanceof HTMLInputElement && !this.nonTextInputTypes.has(element.type)) ||
-      element instanceof HTMLTextAreaElement ||
-      (element instanceof HTMLElement && element.isContentEditable)
-    );
-  }
+  // private isInput(element: Element | null): boolean {
+  //   if (!element) return false;
+  //   return (
+  //     (element instanceof HTMLInputElement && !this.nonTextInputTypes.has(element.type)) ||
+  //     element instanceof HTMLTextAreaElement ||
+  //     (element instanceof HTMLElement && element.isContentEditable)
+  //   );
+  // }
   handleStartCycle(element: HTMLDivElement) {
     // Stop if this is the second click of a double click
     if (this.shouldCancelInteraction) {
