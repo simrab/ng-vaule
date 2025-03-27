@@ -92,9 +92,9 @@ export class DrawerService {
               if (dragDelta <= 0) {
                 return;
               }
-              const transform = `translateX(${dragDelta}px)`;
+              // const transform = `translateY(${dragDelta}px)`;
 
-              drawer.style.transform = transform;
+              // drawer.style.transform = transform;
               drawer.style.transition = 'none';
             }),
           );
@@ -196,8 +196,9 @@ export class DrawerService {
     if (dragDelta <= 0) {
       return;
     }
+
     if (this.direction$.value === 'bottom' ? distMoved > 0 : distMoved < 0) {
-      this.resetDrawer();
+      this.resetDrawer(element);
       return;
     }
     // Coordinate release behavior with snap points
@@ -212,7 +213,7 @@ export class DrawerService {
       this.dragStartPosition$.next(null);
       return;
     }
-    this.resetDrawer();
+    this.resetDrawer(element);
   }
   resetDrawer(element?: HTMLDivElement) {
     if (!element) return;
@@ -346,7 +347,6 @@ export class DrawerService {
     const highlightedText = window.getSelection()?.toString();
     const swipeAmount = drawer ? this.getTranslate(drawer, direction) : null;
     const date = new Date();
-
     // Fixes https://github.com/emilkowalski/vaul/issues/483
     if (element.tagName === 'SELECT') {
       return false;
@@ -422,13 +422,13 @@ export class DrawerService {
     });
 
     // Wait for animation to complete before setting isOpen to false
-    /*     setTimeout(() => {
-      this.setIsOpen(false);
-      set(drawer, {
-        transform: 'none',
-        transition: 'none'
-      });
-    }, TRANSITIONS.DURATION * 1000) */
+    // setTimeout(() => {
+    //   this.setIsOpen(false);
+    //   set(drawer, {
+    //     transform: 'none',
+    //     transition: 'none',
+    //   });
+    // }, TRANSITIONS.DURATION * 1000);
   }
 
   getScale() {

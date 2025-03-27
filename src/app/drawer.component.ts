@@ -13,13 +13,15 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { Subject } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { combineLatest, noop } from 'rxjs';
 import { HandleComponent } from './handle.component';
-import { DOUBLE_TAP_TIMEOUT, DRAG_CLASS, TRANSITIONS, WINDOW_TOP_OFFSET } from './services/constants';
-import { DrawerService } from './services/drawer.service';
-import { isInput, set } from './services/helpers';
-import { DrawerDirection } from './types';
 import { isMobileFirefox } from './services/browser';
+import { BORDER_RADIUS, DRAG_CLASS, TRANSITIONS, WINDOW_TOP_OFFSET } from './services/constants';
+import { DrawerService } from './services/drawer.service';
+import { assignStyle, chain, isInput, set } from './services/helpers';
+import { ScaleBackgroundService } from './services/scale-background.service';
+import { DrawerDirection } from './types';
 
 @Component({
   selector: 'vaul-drawer',
@@ -30,11 +32,9 @@ import { isMobileFirefox } from './services/browser';
       class="vaul-drawer"
       #drawerRef
       (click)="handleStartCycle(drawerRef)"
-      [attr.data-vaul-drawer]=""
       [attr.data-vaul-drawer-direction]="direction()"
       [attr.data-state]="(isOpen$ | async) ? 'open' : 'closed'"
-      [attr.data-vaul-snap-points]="!!snapPoints() ? 'true' : 'false'"
-      [style.height]="drawerHeight()"
+      [style.height.px]="initialDrawerHeight()"
       (drag)="onDrag($event, drawerRef)"
       (pointerdown)="onPointerDown($event, drawerRef)"
       (pointermove)="onPointerMove($event, drawerRef)"
@@ -85,36 +85,84 @@ import { isMobileFirefox } from './services/browser';
   imports: [AsyncPipe, HandleComponent],
 })
 export class DrawerComponent implements AfterViewInit, OnDestroy {
-fixed = input(true);
-  private readonly drawerService = inject(DrawerService);
-  private readonly destroy$ = new Subject<void>();
-
+  public fixed = input(true);
+  private drawerService = inject(DrawerService);
+  private scaleBackgroundService = inject(ScaleBackgroundService);
   readonly open = input(false);
   readonly direction = input<DrawerDirection>('bottom');
-  readonly shouldScaleBackground = input(false);
+  readonly shouldScaleBackground = input(true);
   readonly dismissible = input(true);
   readonly modal = input(true);
   readonly nested = input(false);
   readonly repositionInputs = input(true);
   readonly autoFocus = input(false);
-  readonly snapPoints = model<number[] | undefined>(undefined);
-
   readonly openChange = output<boolean>();
 
   drawerRef = viewChild<ElementRef<HTMLDivElement>>('drawerRef');
 
-  private readonly initialDrawerHeight = signal<number | null>(null);
+  initialDrawerHeight = model<number>(400);
   private readonly keyboardIsOpen = signal(false);
   private readonly previousDiffFromInitial = signal(0);
-  drawerHeight = signal<string | null>(null);
+  drawerHeight = model<string | null>(null);
 
   isOpen$ = this.drawerService.isOpen$;
   lastKnownPointerEventRef: PointerEvent | null = null;
   shouldCancelInteraction: any;
   preventCycle: boolean = false;
-  activeSnapPoint: any;
 
   constructor() {
+    combineLatest({
+      isOpen: this.isOpen$,
+      shouldScale: this.drawerService.shouldScaleBackground$,
+      direction: this.drawerService.direction$,
+      setBackgroundColor: this.drawerService.setBackgroundColorOnScale$,
+      noBodyStyles: this.drawerService.noBodyStyles$,
+    })
+      .pipe(takeUntilDestroyed())
+      .subscribe((state) => {
+        if (state.isOpen && state.shouldScale) {
+          if (this.scaleBackgroundService.timeoutId) {
+            clearTimeout(this.scaleBackgroundService.timeoutId);
+          }
+          const wrapper =
+            (document.querySelector('[data-vaul-drawer-wrapper]') as HTMLElement) ||
+            (document.querySelector('[vaul-drawer-wrapper]') as HTMLElement);
+
+          if (!wrapper) return;
+          chain(
+            state.setBackgroundColor && !state.noBodyStyles
+              ? assignStyle(document.body, { background: 'black' })
+              : noop,
+            assignStyle(wrapper, {
+              transformOrigin: 'top',
+              transitionProperty: 'transform, border-radius',
+              transitionDuration: `${TRANSITIONS.DURATION}s`,
+              transitionTimingFunction: `cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
+            }),
+          );
+
+          const wrapperStylesCleanup = assignStyle(wrapper, {
+            borderRadius: `${BORDER_RADIUS}px`,
+            overflow: 'hidden',
+            transform: `scale(${this.scaleBackgroundService.getScale()}) translate3d(0, calc(env(safe-area-inset-top) + 14px), 0)`,
+          });
+
+          // Cleanup function
+          return () => {
+            wrapperStylesCleanup();
+            this.scaleBackgroundService.timeoutId = window.setTimeout(() => {
+              const initialBg = this.scaleBackgroundService.initialBackgroundColor.value;
+              if (initialBg) {
+                document.body.style.background = initialBg;
+              } else {
+                document.body.style.removeProperty('background');
+              }
+            }, TRANSITIONS.DURATION * 1000);
+          };
+        }
+        return null;
+      });
+
     this.drawerService.openTime$.next(new Date());
     // Watch open state
     effect(() => {
@@ -154,7 +202,6 @@ fixed = input(true);
       if (Math.abs(this.previousDiffFromInitial() - diffFromInitial) > 60) {
         this.keyboardIsOpen.set(!this.keyboardIsOpen());
       }
-      const snapPoints = this.snapPoints();
       this.previousDiffFromInitial.set(diffFromInitial);
       // We don't have to change the height if the input is in view, when we are here we are in the opened keyboard state so we can correctly check if the input is in view
       if (drawerHeight > visualViewportHeight || this.keyboardIsOpen()) {
@@ -174,7 +221,7 @@ fixed = input(true);
         drawer.style.height = `${this.initialDrawerHeight()}px`;
       }
 
-      if (snapPoints && snapPoints.length > 0 && !this.keyboardIsOpen()) {
+      if (!this.keyboardIsOpen()) {
         drawer.style.bottom = `0px`;
       } else {
         // Negative bottom value would never make sense
@@ -188,64 +235,14 @@ fixed = input(true);
       return;
     }
     window.visualViewport.addEventListener('resize', this.onVisualViewportChange);
-    this.destroy$.subscribe(() => {
-      window.visualViewport?.removeEventListener('resize', this.onVisualViewportChange);
-    });
   }
 
-  // private handleInputFocus() {
-  //   const visualViewportHeight = window.visualViewport?.height || 0;
-  //   const totalHeight = window.innerHeight;
-  //   const diffFromInitial = totalHeight - visualViewportHeight;
-  //   const drawerHeight = this.drawerRef()?.nativeElement.getBoundingClientRect().height ?? 0;
-  //   this.drawerService.drawerHeight$.next(drawerHeight);
-  //   const isTallEnough = drawerHeight > totalHeight * 0.8;
-
-  //   if (!this.initialDrawerHeight()) {
-  //     this.initialDrawerHeight.set(drawerHeight);
-  //     this.drawerService.drawerHeight$.next(drawerHeight);
-  //   }
-
-  //   if (Math.abs(this.previousDiffFromInitial() - diffFromInitial) > 60) {
-  //     this.keyboardIsOpen.set(!this.keyboardIsOpen());
-  //   }
-
-  //   this.previousDiffFromInitial.set(diffFromInitial);
-  //   this.updateDrawerHeight(drawerHeight, visualViewportHeight, isTallEnough);
-  // }
-
-  // private updateDrawerHeight(drawerHeight: number, visualViewportHeight: number, isTallEnough: boolean) {
-  //   if (drawerHeight > visualViewportHeight || this.keyboardIsOpen()) {
-  //     const offsetFromTop = this.drawerRef()?.nativeElement.getBoundingClientRect().top;
-  //     let newHeight = drawerHeight;
-  //     if (drawerHeight > visualViewportHeight) {
-  //       newHeight = visualViewportHeight - (isTallEnough ? (offsetFromTop ?? 0) : 0);
-  //     }
-  //     this.drawerHeight.set(`${Math.max(newHeight, visualViewportHeight - (offsetFromTop ?? 0))}px`);
-  //     this.drawerService.drawerHeight$.next(Math.max(newHeight, visualViewportHeight - (offsetFromTop ?? 0)));
-  //   } else {
-  //     this.drawerService.drawerHeight$.next(this.initialDrawerHeight());
-  //     this.drawerHeight.set(`${this.initialDrawerHeight()}px`);
-  //   }
-  // }
-
-  // private isInput(element: Element | null): boolean {
-  //   if (!element) return false;
-  //   return (
-  //     (element instanceof HTMLInputElement && !this.nonTextInputTypes.has(element.type)) ||
-  //     element instanceof HTMLTextAreaElement ||
-  //     (element instanceof HTMLElement && element.isContentEditable)
-  //   );
-  // }
   handleStartCycle(element: HTMLDivElement) {
     // Stop if this is the second click of a double click
     if (this.shouldCancelInteraction) {
       this.handleCancelInteraction();
       return;
     }
-    window.setTimeout(() => {
-      this.handleCycleSnapPoints(element);
-    }, DOUBLE_TAP_TIMEOUT);
   }
   handleStartInteraction() {
     this.shouldCancelInteraction = true;
@@ -253,34 +250,6 @@ fixed = input(true);
   handleCancelInteraction() {
     this.shouldCancelInteraction = false;
   }
-  handleCycleSnapPoints(element: HTMLDivElement) {
-    // Prevent accidental taps while resizing drawer
-    if (this.drawerService.isDragging$.value || this.preventCycle || this.shouldCancelInteraction) {
-      this.handleCancelInteraction();
-      return;
-    }
-    // Make sure to clear the timeout id if the user releases the handle before the cancel timeout
-    this.handleCancelInteraction();
-
-    if (!this.snapPoints() || this.snapPoints()?.length === 0) {
-      if (!this.dismissible()) {
-        this;
-        this.drawerService.closeDrawer(element);
-      }
-      return;
-    }
-  }
-  private readonly nonTextInputTypes = new Set([
-    'checkbox',
-    'radio',
-    'range',
-    'color',
-    'file',
-    'image',
-    'button',
-    'submit',
-    'reset',
-  ]);
 
   ngAfterViewInit() {
     const drawerRef = this.drawerRef();
@@ -300,8 +269,6 @@ fixed = input(true);
   }
 
   ngOnDestroy() {
-    this.destroy$.next();
-    this.destroy$.complete();
     this.drawerService.setDrawerRef(null);
   }
 
@@ -309,11 +276,13 @@ fixed = input(true);
     this.drawerService.pointerStart$.next({ y: event.pageY });
     this.onPress(event, element);
   }
+
   onPointerUp(event: PointerEvent, element: HTMLDivElement) {
     this.drawerService.pointerStart$.next(null);
     this.drawerService.wasBeyondThePoint$.next(false);
     this.onRelease(event, element);
   }
+
   onPointerMove(event: PointerEvent, element: HTMLDivElement) {
     this.lastKnownPointerEventRef = event;
     if (!this.drawerService.pointerStart$.value) return;
@@ -369,11 +338,13 @@ fixed = input(true);
     this.drawerService.isDragging$.next(false);
     this.drawerService.dragEndTime$.next(new Date());
   }
+
   onRelease(event: PointerEvent, element: HTMLDivElement) {
     this.drawerService.isDragging$.next(false);
     this.drawerService.isAllowedToDrag$.next(false);
     this.drawerService.onRelease(event, element);
   }
+
   private handleOnPointerUp(event: PointerEvent | null, element: HTMLDivElement) {
     if (!event) return;
     this.drawerService.pointerStart$.next(null);
