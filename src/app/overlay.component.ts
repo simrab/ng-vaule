@@ -5,11 +5,13 @@ import {
   Component,
   ElementRef,
   inject,
+  input,
   OnDestroy,
   ViewChild,
 } from '@angular/core';
-import { map, Subject } from 'rxjs';
+import { Subject } from 'rxjs';
 import { DrawerService } from './services/drawer.service';
+import { DrawerDirection, DrawerDirectionType } from './types';
 
 @Component({
   selector: 'vaul-overlay',
@@ -48,6 +50,7 @@ import { DrawerService } from './services/drawer.service';
 export class OverlayComponent implements AfterViewInit, OnDestroy {
   private readonly drawerService = inject(DrawerService);
   private readonly destroy$ = new Subject<void>();
+  public direction = input<DrawerDirectionType>(DrawerDirection.BOTTOM);
 
   @ViewChild('overlayRef') overlayRef!: ElementRef<HTMLDivElement>;
 
@@ -63,6 +66,6 @@ export class OverlayComponent implements AfterViewInit, OnDestroy {
   }
 
   onRelease(event: PointerEvent) {
-    this.drawerService.onRelease(event);
+    this.drawerService.onRelease(event, this.direction());
   }
 }

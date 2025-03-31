@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { DrawerComponent } from './drawer.component';
 import { OverlayComponent } from './overlay.component';
 import { DrawerService } from './services/drawer.service';
-
+import { DrawerDirection } from './types';
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -10,9 +10,9 @@ import { DrawerService } from './services/drawer.service';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <button class="trigger-button" (click)="toggleDrawer()">{{ isOpen() ? 'Close' : 'Open' }} Drawer</button>
-    <vaul-overlay />
+    <vaul-overlay [direction]="drawerDirection" />
 
-    <vaul-drawer [open]="isOpen()" [initialDrawerHeight]="380" (openChange)="setIsOpen($event)">
+    <vaul-drawer [open]="isOpen()" [initialDrawerHeight]="380" (openChange)="setIsOpen($event)" [direction]="drawerDirection">
       <div class="drawer-content">
         <div class="content">
           <h2>Drawer Example</h2>
@@ -77,6 +77,7 @@ import { DrawerService } from './services/drawer.service';
 export class AppComponent {
   private readonly drawerService = inject(DrawerService);
   readonly isOpen = signal(false);
+  public drawerDirection = DrawerDirection.BOTTOM;
 
   setIsOpen(value: boolean) {
     this.isOpen.set(value);

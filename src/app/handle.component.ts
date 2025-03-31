@@ -1,8 +1,8 @@
 import { AsyncPipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, ElementRef, inject, input, OnDestroy, ViewChild } from '@angular/core';
 import { Subject } from 'rxjs';
-import { take, takeUntil } from 'rxjs/operators';
 import { DrawerService } from './services/drawer.service';
+import { DrawerDirection, DrawerDirectionType } from './types';
 
 @Component({
   selector: 'vaul-handle',
@@ -61,8 +61,7 @@ export class HandleComponent implements OnDestroy {
   // Create computed signals from observables
   readonly isOpen$ = this.drawerService.isOpen$;
   readonly isDragging$ = this.drawerService.isDragging$;
-  readonly direction$ = this.drawerService.direction$;
-
+  readonly direction = input<DrawerDirectionType>(DrawerDirection.BOTTOM);
   readonly disabled = input(false);
 
   @ViewChild('handleRef') handleRef!: ElementRef<HTMLDivElement>;
@@ -97,7 +96,7 @@ export class HandleComponent implements OnDestroy {
     this.handleRef.nativeElement.releasePointerCapture(event.pointerId);
 
     // End dragging
-    this.drawerService.onRelease(event, this.drawerRef());
+    this.drawerService.onRelease(event, this.direction(), this.drawerRef());
   }
 
   onPointerCancel(event: PointerEvent) {
@@ -107,7 +106,7 @@ export class HandleComponent implements OnDestroy {
     this.handleRef.nativeElement.releasePointerCapture(event.pointerId);
 
     // End dragging
-    this.drawerService.onRelease(event, this.drawerRef());
+    this.drawerService.onRelease(event, this.direction(), this.drawerRef());
   }
 
   ngOnDestroy() {

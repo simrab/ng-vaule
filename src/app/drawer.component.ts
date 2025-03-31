@@ -16,12 +16,13 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { combineLatest, noop } from 'rxjs';
 import { HandleComponent } from './handle.component';
-import { isMobileFirefox } from './services/browser';
+import { isIOS, isMobileFirefox } from './services/browser';
 import { BORDER_RADIUS, DRAG_CLASS, TRANSITIONS, WINDOW_TOP_OFFSET } from './services/constants';
 import { DrawerService } from './services/drawer.service';
-import { assignStyle, chain, isInput, set } from './services/helpers';
+import { assignStyle, chain, isInput, isVertical, set } from './services/helpers';
+import { PreventScrollService } from './services/prevent-scroll.service';
 import { ScaleBackgroundService } from './services/scale-background.service';
-import { DrawerDirection } from './types';
+import { DrawerDirection, DrawerDirectionType } from './types';
 
 @Component({
   selector: 'vaul-drawer',
@@ -40,7 +41,7 @@ import { DrawerDirection } from './types';
       (pointermove)="onPointerMove($event, drawerRef)"
       (pointerout)="onPointerOut(drawerRef)"
       (pointerup)="onPointerUp($event, drawerRef)"
-      (pointercancel)="onRelease($event, drawerRef)"
+      (pointercancel)="onRelease($event, drawerRef, direction())"
       (contextmenu)="onContextMenu(drawerRef)"
     >
       <div class="drawer-content">
@@ -88,8 +89,9 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
   public fixed = input(true);
   private drawerService = inject(DrawerService);
   private scaleBackgroundService = inject(ScaleBackgroundService);
+  private preventScrollService = inject(PreventScrollService);
   readonly open = input(false);
-  readonly direction = input<DrawerDirection>('bottom');
+  readonly direction = input<DrawerDirectionType>(DrawerDirection.BOTTOM);
   readonly shouldScaleBackground = input(true);
   readonly dismissible = input(true);
   readonly modal = input(true);
@@ -253,6 +255,13 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
 
   ngAfterViewInit() {
     const drawerRef = this.drawerRef();
+    let preventScrollCount = 0;
+    preventScrollCount++;
+    if(preventScrollCount === 1) {
+      if(isIOS()) {
+        this.preventScrollService.preventScrollMobileSafari();
+      }
+    }
     if (!drawerRef) return;
     if (drawerRef.nativeElement) {
       this.drawerService.setDrawerRef(drawerRef.nativeElement || null);
@@ -273,33 +282,36 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
   }
 
   onPointerDown(event: PointerEvent, element: HTMLDivElement) {
-    this.drawerService.pointerStart$.next({ y: event.pageY });
+    isVertical(this.direction())
+      ? this.drawerService.pointerStart$.next({ x: event.pageX })
+      : this.drawerService.pointerStart$.next({ y: event.pageY });
     this.onPress(event, element);
   }
 
   onPointerUp(event: PointerEvent, element: HTMLDivElement) {
     this.drawerService.pointerStart$.next(null);
     this.drawerService.wasBeyondThePoint$.next(false);
-    this.onRelease(event, element);
+    this.onRelease(event, element, this.direction());
   }
 
   onPointerMove(event: PointerEvent, element: HTMLDivElement) {
     this.lastKnownPointerEventRef = event;
     if (!this.drawerService.pointerStart$.value) return;
-    const yPosition = event.pageY - this.drawerService.pointerStart$.value.y;
+    const yPosition = event.pageY - (this.drawerService.pointerStart$?.value?.y ?? 0);
+    const xPosition = event.pageX - (this.drawerService.pointerStart$?.value?.x ?? 0);
 
     const swipeStartThreshold: number = event.pointerType === 'touch' ? 10 : 2;
     const delta = { y: yPosition };
-    const direction = yPosition > 0 ? 'bottom' : 'top';
+    const direction = isVertical(this.direction()) ? (yPosition > 0 ? 'bottom' : 'top') : (xPosition > 0 ? 'right' : 'left');
 
     const isAllowedToSwipe = this.isDeltaInDirection(delta, direction, swipeStartThreshold);
     if (isAllowedToSwipe) this.onDrag(event, element);
-    else if (Math.abs(yPosition) > swipeStartThreshold) {
+    else if (Math.abs(isVertical(this.direction()) ? yPosition : xPosition) > swipeStartThreshold) {
       this.drawerService.pointerStart$.next(null);
     }
   }
   onPointerOut(element: HTMLDivElement) {
-    this.handleOnPointerUp(this.lastKnownPointerEventRef, element);
+    this.handleOnPointerUp(this.lastKnownPointerEventRef, element, this.direction());
   }
 
   private isDeltaInDirection(delta: { y: number }, direction: string, threshold = 0) {
@@ -319,7 +331,7 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
 
   onContextMenu(element: HTMLDivElement) {
     if (this.lastKnownPointerEventRef) {
-      this.handleOnPointerUp(this.lastKnownPointerEventRef, element);
+      this.handleOnPointerUp(this.lastKnownPointerEventRef, element, this.direction());
     }
   }
   onPress(event: PointerEvent, element: HTMLDivElement) {
@@ -339,16 +351,16 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
     this.drawerService.dragEndTime$.next(new Date());
   }
 
-  onRelease(event: PointerEvent, element: HTMLDivElement) {
+  onRelease(event: PointerEvent, element: HTMLDivElement, direction: DrawerDirectionType) {
     this.drawerService.isDragging$.next(false);
     this.drawerService.isAllowedToDrag$.next(false);
-    this.drawerService.onRelease(event, element);
+    this.drawerService.onRelease(event, direction, element);
   }
 
-  private handleOnPointerUp(event: PointerEvent | null, element: HTMLDivElement) {
+  private handleOnPointerUp(event: PointerEvent | null, element: HTMLDivElement, direction: DrawerDirectionType) {
     if (!event) return;
     this.drawerService.pointerStart$.next(null);
     this.drawerService.wasBeyondThePoint$.next(false);
-    this.onRelease(event, element);
+    this.onRelease(event, element, direction);
   }
 }

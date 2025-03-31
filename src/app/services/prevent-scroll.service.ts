@@ -126,16 +126,17 @@ export class PreventScrollService {
     );
   }
 
-  private preventScrollMobileSafari() {
+  preventScrollMobileSafari() {
     let scrollable: Element;
     let lastY = 0;
-
+    let lastX = 0;
     const onTouchStart = (e: TouchEvent) => {
       scrollable = this.getScrollParent(e.target as Element);
       if (scrollable === document.documentElement && scrollable === document.body) {
         return;
       }
       lastY = e.changedTouches[0].pageY;
+      lastX = e.changedTouches[0].pageX;
     };
 
     const onTouchMove = (e: TouchEvent) => {

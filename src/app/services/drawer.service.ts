@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, EMPTY, Observable, Subject, combineLatest, map, of, switchMap, takeUntil } from 'rxjs';
-import { DrawerDirection } from '../types';
+import { DrawerDirection, DrawerDirectionType } from '../types';
 import {
   BORDER_RADIUS,
   CLOSE_THRESHOLD,
@@ -10,7 +10,7 @@ import {
   VELOCITY_THRESHOLD,
   WINDOW_TOP_OFFSET,
 } from './constants';
-import { set } from './helpers';
+import { isVertical, set } from './helpers';
 
 @Injectable({
   providedIn: 'root',
@@ -27,7 +27,7 @@ export class DrawerService {
   public drawerRef$ = new BehaviorSubject<HTMLDivElement | null>(null);
   public drawerRefObs$ = this.drawerRef$.asObservable();
   public overlayRef$ = new BehaviorSubject<HTMLElement | null>(null);
-  public direction$ = new BehaviorSubject<DrawerDirection>('bottom');
+  public direction$ = new BehaviorSubject<DrawerDirectionType>(DrawerDirection.BOTTOM);
   public dragStartPosition$ = new BehaviorSubject<{ y: number } | null>(null);
   public shouldScaleBackground$ = new BehaviorSubject<boolean>(false);
   public setBackgroundColorOnScale$ = new BehaviorSubject<boolean>(false);
@@ -40,7 +40,7 @@ export class DrawerService {
   public currentPointerPositionObs$: Observable<{ y: number } | null> = this.currentPointerPosition$.asObservable();
 
   public wasBeyondThePoint$ = new BehaviorSubject<boolean | null>(null);
-  public pointerStart$ = new BehaviorSubject<{ y: number } | null>(null);
+  public pointerStart$ = new BehaviorSubject<{ x?: number; y?: number } | null>(null);
   public dragEndTime$ = new BehaviorSubject<Date | null>(null);
   public dragStartTime$ = new BehaviorSubject<Date | null>(null);
   public drawerHeight$ = new BehaviorSubject<number | null>(null);
@@ -148,7 +148,7 @@ export class DrawerService {
     this.stateChange$.next();
   }
 
-  setDirection(direction: DrawerDirection) {
+  setDirection(direction: DrawerDirectionType) {
     this.direction$.next(direction);
     this.stateChange$.next();
   }
@@ -182,13 +182,13 @@ export class DrawerService {
     });
   }
 
-  onRelease(event: PointerEvent | null, element?: HTMLDivElement) {
+  onRelease(event: PointerEvent | null, direction: DrawerDirectionType, element?: HTMLDivElement) {
     if (!element) return;
     if (!event || !this.isDragging$.value) return;
     this.dragEndTime$.next(new Date());
 
     const timeTaken = (this.dragEndTime$.value?.getTime() || 0) - (this.dragStartTime$.value?.getTime() || 0);
-    const distMoved = (this.pointerStart$?.value?.y || 0) - event.pageY;
+    const distMoved = (this.pointerStart$?.value?.y || 0) - (isVertical(direction) ? event.pageY : event.pageX);
     const velocity = Math.abs(distMoved) / timeTaken;
     const dragDelta = this.calculateDragDelta();
     const swipeAmount = this.getTranslate(element, this.direction$.value);
@@ -198,7 +198,7 @@ export class DrawerService {
     }
 
     if (this.direction$.value === 'bottom' ? distMoved > 0 : distMoved < 0) {
-      this.resetDrawer(element);
+      this.resetDrawer(direction, element);
       return;
     }
     // Coordinate release behavior with snap points
@@ -213,9 +213,9 @@ export class DrawerService {
       this.dragStartPosition$.next(null);
       return;
     }
-    this.resetDrawer(element);
+    this.resetDrawer(direction, element);
   }
-  resetDrawer(element?: HTMLDivElement) {
+  resetDrawer(direction: DrawerDirectionType, element?: HTMLDivElement) {
     if (!element) return;
     const wrapper = document.querySelector('[data-vaul-drawer-wrapper]');
     const currentSwipeAmount = this.getTranslate(element, this.direction$.value);
@@ -237,7 +237,15 @@ export class DrawerService {
         {
           borderRadius: `${BORDER_RADIUS}px`,
           overflow: 'hidden',
-          transform: `scale(${this.getScale()}) translate3d(0, calc(env(safe-area-inset-top) + 14px), 0)`,
+          ...(isVertical(direction)
+            ? {
+                transform: `scale(${this.getScale()}) translate3d(0, calc(env(safe-area-inset-top) + 14px), 0)`,
+                transformOrigin: 'top',
+              }
+            : {
+                transform: `scale(${this.getScale()}) translate3d(calc(env(safe-area-inset-top) + 14px), 0, 0)`,
+                transformOrigin: 'left',
+              }),
           transformOrigin: 'top',
           transitionProperty: 'transform, border-radius',
           transitionDuration: `${TRANSITIONS.DURATION}s`,
@@ -255,7 +263,8 @@ export class DrawerService {
     if (this.isDragging$.value) {
       const directionMultiplier = direction === 'bottom' ? 1 : -1;
       const pointerStartY = this.pointerStart$?.value?.y ?? 0;
-      const draggedDistance = (pointerStartY - event.pageY) * directionMultiplier;
+      const pointerStartX = this.pointerStart$?.value?.x ?? 0;
+      const draggedDistance = (isVertical(direction) ? pointerStartY - event.pageY : pointerStartX - event.pageX) * directionMultiplier;
       const isDraggingInDirection = draggedDistance > 0;
 
       // Pre condition for disallowing dragging in the close direction.
@@ -295,7 +304,7 @@ export class DrawerService {
 
         const translateValue = Math.min(dampenedDraggedDistance * -1, 0) * directionMultiplier;
         set(element, {
-          transform: `translate3d(0, ${translateValue}px, 0)`,
+          transform: isVertical(direction) ? `translate3d(0, ${translateValue}px, 0)` : `translate3d(${translateValue}px, 0, 0)`,
         });
         return;
       }
@@ -509,7 +518,7 @@ export class DrawerService {
     this.dragEndTime$.next(new Date());
   }
 
-  private getTranslate(element: HTMLElement, direction: DrawerDirection) {
+  private getTranslate(element: HTMLElement, direction: DrawerDirectionType) {
     if (!element) {
       return null;
     }
