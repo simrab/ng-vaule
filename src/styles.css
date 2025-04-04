@@ -283,3 +283,12 @@ body[data-vaul-drawer-active] {
   touch-action: none;
   -webkit-touch-callout: none;
 }
+
+.origin-bottom {
+  transform-origin: bottom center;
+}
+
+.origin-right {
+  transform-origin: right center;
+}
+

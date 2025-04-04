@@ -1,7 +1,8 @@
 import { Injectable, inject } from '@angular/core';
-import { Subject, takeUntil } from 'rxjs';
+import { BehaviorSubject, Subject, takeUntil } from 'rxjs';
 import { isIOS } from './browser';
 import { DrawerService } from './drawer.service';
+import { isVertical } from './helpers';
 
 const KEYBOARD_BUFFER = 24;
 
@@ -27,7 +28,7 @@ export class PreventScrollService {
   private preventScrollCount = 0;
   private restore: (() => void) | undefined;
   private readonly visualViewport = typeof window !== 'undefined' ? window.visualViewport : null;
-
+  
   constructor() {
     // Watch for drawer open state changes
     this.drawerService.isOpen$
@@ -160,9 +161,10 @@ export class PreventScrollService {
 
     const onTouchEnd = (e: TouchEvent) => {
       const target = e.target as HTMLElement;
+      const direction = this.drawerService.direction$.getValue();
       if (this.isInput(target) && target !== document.activeElement) {
         e.preventDefault();
-        target.style.transform = 'translateY(-2000px)';
+        target.style.transform = isVertical(direction) ? 'translateY(-2000px)' : 'translateX(-2000px)';
         target.focus();
         requestAnimationFrame(() => {
           target.style.transform = '';

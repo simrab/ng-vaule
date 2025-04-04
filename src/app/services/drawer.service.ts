@@ -43,7 +43,8 @@ export class DrawerService {
   public pointerStart$ = new BehaviorSubject<{ x?: number; y?: number } | null>(null);
   public dragEndTime$ = new BehaviorSubject<Date | null>(null);
   public dragStartTime$ = new BehaviorSubject<Date | null>(null);
-  public drawerHeight$ = new BehaviorSubject<number | null>(null);
+  public drawerHeightorWidth$ = new BehaviorSubject<number | null>(null);
+  public drawerWidth$ = new BehaviorSubject<number | null>(null);
   public isAllowedToDrag$ = new BehaviorSubject<boolean>(false);
   public openTime$ = new BehaviorSubject<Date | null>(null);
 
@@ -53,26 +54,29 @@ export class DrawerService {
     map(([drawer, isDragging]) => {
       if (!drawer) return null;
       const offset = isDragging ? this.calculateDragDelta() : 0;
-      return `translateY(${offset}px)`;
+      return isVertical(this.direction$.value) ? `translateY(${offset}px)` : `translateX(${offset}px)`;
     }),
   );
   constructor() {
     // Subscribe to state changes
     this.stateChange$.pipe(takeUntil(this.destroy$)).subscribe(() => {
       const drawer = this.drawerRef$.value;
+      const direction = this.direction$.value;
       if (!drawer) return;
 
       if (this.isOpen$.value) {
-        this.updateDrawerTransform(drawer);
+        this.updateDrawerTransform(drawer, direction);
       }
     });
 
     // Subscribe to drawer ref changes
     this.drawerRefObs$.pipe(takeUntil(this.destroy$)).subscribe((drawer: HTMLDivElement | null) => {
       if (!drawer) return;
+      const direction = this.direction$.value;
       if (!this.isOpen$.value) {
         const height = drawer.getBoundingClientRect().height;
-        drawer.style.transform = `translateY(${height}px)`;
+        const width = drawer.getBoundingClientRect().width;
+        drawer.style.transform = isVertical(direction) ? `translateY(${height}px)` : `translateX(${width}px)`;
       }
     });
 
@@ -92,9 +96,7 @@ export class DrawerService {
               if (dragDelta <= 0) {
                 return;
               }
-              // const transform = `translateY(${dragDelta}px)`;
 
-              // drawer.style.transform = transform;
               drawer.style.transition = 'none';
             }),
           );
@@ -108,7 +110,9 @@ export class DrawerService {
         const drawer = this.drawerRef$.value;
         if (drawer) {
           const height = drawer.getBoundingClientRect().height;
-          drawer.style.transform = `translateY(${height}px)`;
+          const width = drawer.getBoundingClientRect().height;
+          const direction = this.direction$.value;
+          drawer.style.transform = isVertical(direction) ? `translateY(${height}px)` : `translateX(${width}px)`;
         }
       }
     });
@@ -125,15 +129,19 @@ export class DrawerService {
     this.stateChange$.next();
   }
 
-  private updateDrawerTransform(drawer: HTMLElement) {
-    const offset = drawer?.getBoundingClientRect().height || 0;
+  private updateDrawerTransform(drawer: HTMLElement, direction: DrawerDirectionType) {
+    const offset = isVertical(direction)
+      ? drawer?.getBoundingClientRect().width
+      : drawer?.getBoundingClientRect().height;
 
     // Get current drag state
     const isDragging = this.isDragging$.value;
     const dragDelta = isDragging ? this.calculateDragDelta() : 0;
     const finalOffset = offset + dragDelta;
 
-    const transform = `translateY(${finalOffset - offset}px)`;
+    const transform = isVertical(direction)
+      ? `translateY(${finalOffset - offset}px)`
+      : `translateX(${finalOffset - offset}px)`;
 
     set(drawer, {
       transition: isDragging
@@ -157,7 +165,8 @@ export class DrawerService {
     if (ref) {
       // Set initial transform to hide drawer
       const height = ref.getBoundingClientRect().height;
-      ref.style.transform = `translateY(${height}px)`;
+      const width = ref.getBoundingClientRect().width;
+      ref.style.transform = isVertical(this.direction$.value) ? `translateY(${height}px)` : `translateX(${width}px)`;
     }
 
     this.drawerRef$.next(ref);
@@ -188,26 +197,31 @@ export class DrawerService {
     this.dragEndTime$.next(new Date());
 
     const timeTaken = (this.dragEndTime$.value?.getTime() || 0) - (this.dragStartTime$.value?.getTime() || 0);
-    const distMoved = (this.pointerStart$?.value?.y || 0) - (isVertical(direction) ? event.pageY : event.pageX);
+    const distMoved =
+      (isVertical(direction) ? this.pointerStart$?.value?.y : this.pointerStart$?.value?.x) ||
+      0 - (isVertical(direction) ? event.pageY : event.pageX);
     const velocity = Math.abs(distMoved) / timeTaken;
     const dragDelta = this.calculateDragDelta();
-    const swipeAmount = this.getTranslate(element, this.direction$.value);
+    const swipeAmount = this.getTranslate(element, direction);
 
     if (dragDelta <= 0) {
       return;
     }
 
-    if (this.direction$.value === 'bottom' ? distMoved > 0 : distMoved < 0) {
+    if (direction === DrawerDirection.BOTTOM || direction === DrawerDirection.RIGHT ? distMoved > 0 : distMoved < 0) {
       this.resetDrawer(direction, element);
       return;
     }
-    // Coordinate release behavior with snap points
     if (velocity > VELOCITY_THRESHOLD) {
       this.closeDrawer(element);
       return;
     }
     const visibleDrawerHeight = Math.min(element?.getBoundingClientRect().height ?? 0, window.innerHeight);
-    if (Math.abs(swipeAmount || 0) >= visibleDrawerHeight * CLOSE_THRESHOLD) {
+    const visibleDrawerWidth = Math.min(element?.getBoundingClientRect().width ?? 0, window.innerWidth);
+    if (
+      Math.abs(swipeAmount || 0) >=
+      (isVertical(direction) ? visibleDrawerHeight : visibleDrawerWidth) * CLOSE_THRESHOLD
+    ) {
       this.closeDrawer(element);
       this.isDragging$.next(false);
       this.dragStartPosition$.next(null);
@@ -246,7 +260,7 @@ export class DrawerService {
                 transform: `scale(${this.getScale()}) translate3d(calc(env(safe-area-inset-top) + 14px), 0, 0)`,
                 transformOrigin: 'left',
               }),
-          transformOrigin: 'top',
+          transformOrigin: isVertical(direction) ? 'top' : 'left',
           transitionProperty: 'transform, border-radius',
           transitionDuration: `${TRANSITIONS.DURATION}s`,
           transitionTimingFunction: `cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
@@ -261,10 +275,11 @@ export class DrawerService {
     if (!element) return;
     // We need to know how much of the drawer has been dragged in percentages so that we can transform background accordingly
     if (this.isDragging$.value) {
-      const directionMultiplier = direction === 'bottom' ? 1 : -1;
+      const directionMultiplier = direction === 'bottom' || direction === 'right' ? 1 : -1;
       const pointerStartY = this.pointerStart$?.value?.y ?? 0;
       const pointerStartX = this.pointerStart$?.value?.x ?? 0;
-      const draggedDistance = (isVertical(direction) ? pointerStartY - event.pageY : pointerStartX - event.pageX) * directionMultiplier;
+      const draggedDistance =
+        (isVertical(direction) ? pointerStartY - event.pageY : pointerStartX - event.pageX) * directionMultiplier;
       const isDraggingInDirection = draggedDistance > 0;
 
       // Pre condition for disallowing dragging in the close direction.
@@ -276,10 +291,12 @@ export class DrawerService {
       // We need to capture last time when drag with scroll was triggered and have a timeout between
       const absDraggedDistance = Math.abs(draggedDistance);
       const wrapper = document.querySelector('[data-vaul-drawer-wrapper]');
-      const drawerDimension = this.drawerHeight$.value ?? 0;
+      const drawerVerticalDimension = this.drawerHeightorWidth$.value ?? 0;
+      const drawerHorizontalDimension = this.drawerHeightorWidth$.value ?? 0;
 
       // Calculate the percentage dragged, where 1 is the closed position
-      let percentageDragged = absDraggedDistance / drawerDimension;
+      let percentageDragged =
+        absDraggedDistance / (isVertical(direction) ? drawerVerticalDimension : drawerHorizontalDimension);
 
       // Disallow close dragging beyond the smallest snap point.
       if (noCloseSnapPointsPreCondition && percentageDragged >= 1) {
@@ -304,7 +321,9 @@ export class DrawerService {
 
         const translateValue = Math.min(dampenedDraggedDistance * -1, 0) * directionMultiplier;
         set(element, {
-          transform: isVertical(direction) ? `translate3d(0, ${translateValue}px, 0)` : `translate3d(${translateValue}px, 0, 0)`,
+          transform: isVertical(direction)
+            ? `translate3d(0, ${translateValue}px, 0)`
+            : `translate3d(${translateValue}px, 0, 0)`,
         });
         return;
       }
@@ -426,7 +445,9 @@ export class DrawerService {
     this.isOpen$.next(false);
     // Animate to bottom of screen
     set(drawer, {
-      transform: `translateY(${window.innerHeight}px)`,
+      transform: isVertical(this.direction$.value)
+        ? `translateY(${window.innerHeight}px)`
+        : `translateX(${window.innerWidth}px)`,
       transition: `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
     });
 

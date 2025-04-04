@@ -3,6 +3,7 @@ import {
   AfterViewInit,
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   effect,
   ElementRef,
   inject,
@@ -35,7 +36,10 @@ import { DrawerDirection, DrawerDirectionType } from './types';
       (click)="handleStartCycle(drawerRef)"
       [attr.data-vaul-drawer-direction]="direction()"
       [attr.data-state]="(isOpen$ | async) ? 'open' : 'closed'"
-      [style.height.px]="initialDrawerHeight()"
+      [style.height]="isVertical(direction()) ? initialDrawerHeightorWidth() + 'px' : '100vh'"
+      [style.width]="isVertical(direction()) ? '100vw' : this.initialDrawerHeightorWidth() + 'px'"
+      [style.bottom]="isVertical(direction()) ? '0' : 'auto'"
+      [style.right]="isVertical(direction()) ? 'auto' : '0'"
       (drag)="onDrag($event, drawerRef)"
       (pointerdown)="onPointerDown($event, drawerRef)"
       (pointermove)="onPointerMove($event, drawerRef)"
@@ -56,30 +60,26 @@ import { DrawerDirection, DrawerDirectionType } from './types';
     `
       :host {
         position: fixed;
-        left: 0;
-        right: 0;
         bottom: 0;
         z-index: var(--vaul-drawer-z-index, 999);
         display: flex;
         flex-direction: column;
         pointer-events: none;
-        transform-origin: bottom center;
-        height: 100%;
+        height: auto;
+        right: 0;
       }
 
       .vaul-drawer {
         position: absolute;
-        bottom: 0;
-        left: 0;
         right: 0;
-        width: 100%;
+        width: auto;
+        max-width: 100%;
         height: auto;
         overflow: hidden;
         pointer-events: auto;
         background: white;
         border-radius: 8px 8px 0 0;
         will-change: transform;
-        transform-origin: bottom center;
       }
     `,
   ],
@@ -90,6 +90,7 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
   private drawerService = inject(DrawerService);
   private scaleBackgroundService = inject(ScaleBackgroundService);
   private preventScrollService = inject(PreventScrollService);
+  private destroyRef$ = inject(DestroyRef);
   readonly open = input(false);
   readonly direction = input<DrawerDirectionType>(DrawerDirection.BOTTOM);
   readonly shouldScaleBackground = input(true);
@@ -102,9 +103,10 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
 
   drawerRef = viewChild<ElementRef<HTMLDivElement>>('drawerRef');
 
-  initialDrawerHeight = model<number>(400);
+  initialDrawerHeightorWidth = model<number>(400);
   private readonly keyboardIsOpen = signal(false);
   private readonly previousDiffFromInitial = signal(0);
+  public isVertical = isVertical;
   drawerHeight = model<string | null>(null);
 
   isOpen$ = this.drawerService.isOpen$;
@@ -113,6 +115,109 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
   preventCycle: boolean = false;
 
   constructor() {
+    this.drawerService.openTime$.next(new Date());
+    // Watch open state
+    effect(() => {
+      const isOpen = this.open();
+      this.drawerService.setIsOpen(isOpen);
+    });
+
+    effect(() => {
+      this.drawerService.setDirection(this.direction());
+      this.drawerService.setScaleBackground(this.shouldScaleBackground());
+      this.drawerService.setModal(this.modal());
+      this.drawerService.setNested(this.nested());
+    });
+  }
+
+  private onVisualViewportChange() {
+    const drawer = this.drawerRef()?.nativeElement;
+    if (!drawer) return;
+    const focusedElement = document.activeElement as HTMLElement;
+    if (isInput(focusedElement) || this.keyboardIsOpen()) {
+      const visualViewportHeight = window.visualViewport?.height || 0;
+      const totalHeight = window.innerHeight;
+      // This is the height of the keyboard
+      let diffFromInitial = totalHeight - visualViewportHeight;
+      const drawerHeight = drawer.getBoundingClientRect().height || 0;
+      // Adjust drawer height only if it's tall enough
+      const isTallEnough = drawerHeight > totalHeight * 0.8;
+
+      if (!this.initialDrawerHeightorWidth()) {
+        this.initialDrawerHeightorWidth.set(drawerHeight);
+      }
+      const offsetFromTop = drawer.getBoundingClientRect().top;
+
+      // visualViewport height may change due to somq e subtle changes to the keyboard. Checking if the height changed by 60 or more will make sure that they keyboard really changed its open state.
+      if (Math.abs(this.previousDiffFromInitial() - diffFromInitial) > 60) {
+        this.keyboardIsOpen.set(!this.keyboardIsOpen());
+      }
+      this.previousDiffFromInitial.set(diffFromInitial);
+      // We don't have to change the height if the input is in view, when we are here we are in the opened keyboard state so we can correctly check if the input is in view
+      if (drawerHeight > visualViewportHeight || this.keyboardIsOpen()) {
+        const height = drawer.getBoundingClientRect().height;
+        const width = drawer.getBoundingClientRect().width;
+        let newDrawerHeight = height;
+        let newDrawerWidth = width;
+        if (isVertical(this.direction())) {
+          if (height > visualViewportHeight) {
+            newDrawerHeight = visualViewportHeight - (isTallEnough ? offsetFromTop : WINDOW_TOP_OFFSET);
+          }
+          // When fixed, don't move the drawer upwards if there's space, but rather only change it's height so it's fully scrollable when the keyboard is open
+          if (this.fixed()) {
+            drawer.style.height = `${height - Math.max(diffFromInitial, 0)}px`;
+          } else {
+            drawer.style.height = `${Math.max(newDrawerHeight, visualViewportHeight - offsetFromTop)}px`;
+          }
+        } else {
+          if (width > visualViewportHeight) {
+            newDrawerWidth = visualViewportHeight - (isTallEnough ? offsetFromTop : WINDOW_TOP_OFFSET);
+          }
+          // When fixed, don't move the drawer upwards if there's space, but rather only change it's height so it's fully scrollable when the keyboard is open
+          if (this.fixed()) {
+            drawer.style.height = `${height - Math.max(diffFromInitial, 0)}px`;
+          } else {
+            drawer.style.height = `${Math.max(newDrawerHeight, visualViewportHeight - offsetFromTop)}px`;
+          }
+        }
+      } else if (!isMobileFirefox()) {
+        drawer.style.height = `${this.initialDrawerHeightorWidth()}px`;
+      }
+
+      if (!this.keyboardIsOpen()) {
+        drawer.style.bottom = `0px`;
+      } else {
+        // Negative bottom value would never make sense
+        drawer.style.bottom = `${Math.max(diffFromInitial, 0)}px`;
+      }
+    }
+  }
+
+  private setupVisualViewport() {
+    if (typeof window === 'undefined' || !window.visualViewport || !this.repositionInputs()) {
+      return;
+    }
+    window.visualViewport.addEventListener('resize', this.onVisualViewportChange.bind(this));
+  }
+
+  handleStartCycle(element: HTMLDivElement) {
+    // Stop if this is the second click of a double click
+    if (this.shouldCancelInteraction) {
+      this.handleCancelInteraction();
+      return;
+    }
+  }
+  handleStartInteraction() {
+    this.shouldCancelInteraction = true;
+  }
+  handleCancelInteraction() {
+    this.shouldCancelInteraction = false;
+  }
+
+  ngAfterViewInit() {
+    this.drawerService.drawerHeightorWidth$.next(this.initialDrawerHeightorWidth());
+    // Setup visual viewport handling
+    this.setupVisualViewport();
     combineLatest({
       isOpen: this.isOpen$,
       shouldScale: this.drawerService.shouldScaleBackground$,
@@ -120,7 +225,7 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
       setBackgroundColor: this.drawerService.setBackgroundColorOnScale$,
       noBodyStyles: this.drawerService.noBodyStyles$,
     })
-      .pipe(takeUntilDestroyed())
+      .pipe(takeUntilDestroyed(this.destroyRef$))
       .subscribe((state) => {
         if (state.isOpen && state.shouldScale) {
           if (this.scaleBackgroundService.timeoutId) {
@@ -136,7 +241,7 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
               ? assignStyle(document.body, { background: 'black' })
               : noop,
             assignStyle(wrapper, {
-              transformOrigin: 'top',
+              transformOrigin: isVertical(this.direction()) ? 'top' : 'left',
               transitionProperty: 'transform, border-radius',
               transitionDuration: `${TRANSITIONS.DURATION}s`,
               transitionTimingFunction: `cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
@@ -164,109 +269,21 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
         }
         return null;
       });
-
-    this.drawerService.openTime$.next(new Date());
-    // Watch open state
-    effect(() => {
-      const isOpen = this.open();
-      this.drawerService.setIsOpen(isOpen);
-    });
-
-    effect(() => {
-      this.drawerService.setDirection(this.direction());
-      this.drawerService.setScaleBackground(this.shouldScaleBackground());
-      this.drawerService.setModal(this.modal());
-      this.drawerService.setNested(this.nested());
-    });
-
-    // Setup visual viewport handling
-    this.setupVisualViewport();
-  }
-  private onVisualViewportChange() {
-    const drawer = this.drawerRef()?.nativeElement;
-    if (!drawer) return;
-    const focusedElement = document.activeElement as HTMLElement;
-    if (isInput(focusedElement) || this.keyboardIsOpen()) {
-      const visualViewportHeight = window.visualViewport?.height || 0;
-      const totalHeight = window.innerHeight;
-      // This is the height of the keyboard
-      let diffFromInitial = totalHeight - visualViewportHeight;
-      const drawerHeight = drawer.getBoundingClientRect().height || 0;
-      // Adjust drawer height only if it's tall enough
-      const isTallEnough = drawerHeight > totalHeight * 0.8;
-
-      if (!this.initialDrawerHeight()) {
-        this.initialDrawerHeight.set(drawerHeight);
-      }
-      const offsetFromTop = drawer.getBoundingClientRect().top;
-
-      // visualViewport height may change due to somq e subtle changes to the keyboard. Checking if the height changed by 60 or more will make sure that they keyboard really changed its open state.
-      if (Math.abs(this.previousDiffFromInitial() - diffFromInitial) > 60) {
-        this.keyboardIsOpen.set(!this.keyboardIsOpen());
-      }
-      this.previousDiffFromInitial.set(diffFromInitial);
-      // We don't have to change the height if the input is in view, when we are here we are in the opened keyboard state so we can correctly check if the input is in view
-      if (drawerHeight > visualViewportHeight || this.keyboardIsOpen()) {
-        const height = drawer.getBoundingClientRect().height;
-        let newDrawerHeight = height;
-
-        if (height > visualViewportHeight) {
-          newDrawerHeight = visualViewportHeight - (isTallEnough ? offsetFromTop : WINDOW_TOP_OFFSET);
-        }
-        // When fixed, don't move the drawer upwards if there's space, but rather only change it's height so it's fully scrollable when the keyboard is open
-        if (this.fixed()) {
-          drawer.style.height = `${height - Math.max(diffFromInitial, 0)}px`;
-        } else {
-          drawer.style.height = `${Math.max(newDrawerHeight, visualViewportHeight - offsetFromTop)}px`;
-        }
-      } else if (!isMobileFirefox()) {
-        drawer.style.height = `${this.initialDrawerHeight()}px`;
-      }
-
-      if (!this.keyboardIsOpen()) {
-        drawer.style.bottom = `0px`;
-      } else {
-        // Negative bottom value would never make sense
-        drawer.style.bottom = `${Math.max(diffFromInitial, 0)}px`;
-      }
-    }
-  }
-
-  private setupVisualViewport() {
-    if (typeof window === 'undefined' || !window.visualViewport || !this.repositionInputs()) {
-      return;
-    }
-    window.visualViewport.addEventListener('resize', this.onVisualViewportChange);
-  }
-
-  handleStartCycle(element: HTMLDivElement) {
-    // Stop if this is the second click of a double click
-    if (this.shouldCancelInteraction) {
-      this.handleCancelInteraction();
-      return;
-    }
-  }
-  handleStartInteraction() {
-    this.shouldCancelInteraction = true;
-  }
-  handleCancelInteraction() {
-    this.shouldCancelInteraction = false;
-  }
-
-  ngAfterViewInit() {
     const drawerRef = this.drawerRef();
     let preventScrollCount = 0;
     preventScrollCount++;
-    if(preventScrollCount === 1) {
-      if(isIOS()) {
+    if (preventScrollCount === 1) {
+      if (isIOS()) {
         this.preventScrollService.preventScrollMobileSafari();
       }
     }
     if (!drawerRef) return;
     if (drawerRef.nativeElement) {
       this.drawerService.setDrawerRef(drawerRef.nativeElement || null);
-      const offset = drawerRef.nativeElement.getBoundingClientRect().height || 0;
-      const transform = `translateY(${offset}px)`;
+      const offset = isVertical(this.direction())
+        ? drawerRef.nativeElement.getBoundingClientRect().height
+        : drawerRef.nativeElement.getBoundingClientRect().width;
+      const transform = isVertical(this.direction()) ? `translateY(${offset}px)` : `translateX(${offset}px)`;
       set(drawerRef.nativeElement, {
         transition: `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
         transform,
@@ -302,7 +319,13 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
 
     const swipeStartThreshold: number = event.pointerType === 'touch' ? 10 : 2;
     const delta = { y: yPosition };
-    const direction = isVertical(this.direction()) ? (yPosition > 0 ? 'bottom' : 'top') : (xPosition > 0 ? 'right' : 'left');
+    const direction = isVertical(this.direction())
+      ? yPosition > 0
+        ? 'bottom'
+        : 'top'
+      : xPosition > 0
+      ? 'right'
+      : 'left';
 
     const isAllowedToSwipe = this.isDeltaInDirection(delta, direction, swipeStartThreshold);
     if (isAllowedToSwipe) this.onDrag(event, element);

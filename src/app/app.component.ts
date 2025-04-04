@@ -1,8 +1,9 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { DrawerComponent } from './drawer.component';
 import { OverlayComponent } from './overlay.component';
 import { DrawerService } from './services/drawer.service';
-import { DrawerDirection } from './types';
+import { DrawerDirection, DrawerDirectionType } from './types';
+import { isVertical } from './services/helpers';
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -10,9 +11,18 @@ import { DrawerDirection } from './types';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <button class="trigger-button" (click)="toggleDrawer()">{{ isOpen() ? 'Close' : 'Open' }} Drawer</button>
-    <vaul-overlay [direction]="drawerDirection" />
+    <!-- TODO Do I need the direction in vaul-overlay? -->
+    <vaul-overlay [direction]="drawerDirection()" />
 
-    <vaul-drawer [open]="isOpen()" [initialDrawerHeight]="380" (openChange)="setIsOpen($event)" [direction]="drawerDirection">
+    <vaul-drawer
+      [class]="'origin-' + drawerDirection"
+      [style.height]="isVertical(drawerDirection()) ? '100%' : '100vh'"
+      [style.width]="isVertical(drawerDirection()) ? '100vw' : '100%'"
+      [open]="isOpen()"
+      [initialDrawerHeightorWidth]="380"
+      (openChange)="setIsOpen($event)"
+      [direction]="drawerDirection()"
+    >
       <div class="drawer-content">
         <div class="content">
           <h2>Drawer Example</h2>
@@ -53,7 +63,6 @@ import { DrawerDirection } from './types';
         display: flex;
         flex-direction: column;
         position: relative;
-        min-height: 200px;
       }
 
       .content {
@@ -74,10 +83,16 @@ import { DrawerDirection } from './types';
     `,
   ],
 })
-export class AppComponent {
+export class AppComponent implements OnInit {
   private readonly drawerService = inject(DrawerService);
   readonly isOpen = signal(false);
-  public drawerDirection = DrawerDirection.BOTTOM;
+  public drawerDirectionValues = DrawerDirection;
+  public drawerDirection = signal<DrawerDirectionType>(DrawerDirection.BOTTOM);
+  public isVertical = isVertical;
+
+  ngOnInit(): void {
+    this.drawerService.direction$.next(this.drawerDirection());
+  }
 
   setIsOpen(value: boolean) {
     this.isOpen.set(value);
