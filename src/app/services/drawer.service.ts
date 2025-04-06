@@ -68,6 +68,12 @@ export class DrawerService {
         this.updateDrawerTransform(drawer, direction);
       }
     });
+    this.isAllowedToDrag$
+      .asObservable()
+      .pipe()
+      .subscribe((value) => {
+        console.log(value);
+      });
 
     // Subscribe to drawer ref changes
     this.drawerRefObs$.pipe(takeUntil(this.destroy$)).subscribe((drawer: HTMLDivElement | null) => {
@@ -282,26 +288,16 @@ export class DrawerService {
         (isVertical(direction) ? pointerStartY - event.pageY : pointerStartX - event.pageX) * directionMultiplier;
       const isDraggingInDirection = draggedDistance > 0;
 
-      // Pre condition for disallowing dragging in the close direction.
-      const noCloseSnapPointsPreCondition = !dismissible && !isDraggingInDirection;
-
-      // Disallow dragging down to close when first snap point is the active one and dismissible prop is set to false.
-      if (noCloseSnapPointsPreCondition) return;
-
       // We need to capture last time when drag with scroll was triggered and have a timeout between
       const absDraggedDistance = Math.abs(draggedDistance);
       const wrapper = document.querySelector('[data-vaul-drawer-wrapper]');
-      const drawerVerticalDimension = this.drawerHeightorWidth$.value ?? 0;
-      const drawerHorizontalDimension = this.drawerHeightorWidth$.value ?? 0;
+      const drawerDimension = isVertical(this.direction$.value)
+        ? element.getBoundingClientRect().height || 0
+        : element.getBoundingClientRect().width || 0;
 
       // Calculate the percentage dragged, where 1 is the closed position
-      let percentageDragged =
-        absDraggedDistance / (isVertical(direction) ? drawerVerticalDimension : drawerHorizontalDimension);
+      let percentageDragged = absDraggedDistance / drawerDimension;
 
-      // Disallow close dragging beyond the smallest snap point.
-      if (noCloseSnapPointsPreCondition && percentageDragged >= 1) {
-        return;
-      }
       if (!event.target) return;
       if (!this.isAllowedToDrag$.value && !this.shouldDrag(event.target, isDraggingInDirection)) return;
       element.classList.add(DRAG_CLASS);
@@ -315,7 +311,6 @@ export class DrawerService {
         transition: 'none',
       });
 
-      // Run this only if snapPoints are not defined or if we are at the last snap point (highest one)
       if (isDraggingInDirection) {
         const dampenedDraggedDistance = this.dampenValue(draggedDistance);
 
@@ -327,8 +322,6 @@ export class DrawerService {
         });
         return;
       }
-
-      const opacityValue = 1 - percentageDragged;
 
       if (wrapper && this.overlayRef$.value) {
         // Calculate percentageDragged as a fraction (0 to 1)

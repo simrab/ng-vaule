@@ -270,7 +270,7 @@
 .vaul-drawer {
   pointer-events: auto;
   transform-origin: bottom center;
-  max-height: calc(100% - env(safe-area-inset-top) - 34px);
+  /* max-height: calc(100% - env(safe-area-inset-top) - 34px); */
   will-change: transform;
 }
 
@@ -291,4 +291,3 @@ body[data-vaul-drawer-active] {
 .origin-right {
   transform-origin: right center;
 }
-

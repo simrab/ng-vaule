@@ -16,7 +16,7 @@ import { isVertical } from './services/helpers';
 
     <vaul-drawer
       [class]="'origin-' + drawerDirection"
-      [style.height]="isVertical(drawerDirection()) ? '100%' : '100vh'"
+      [style.height]="isVertical(drawerDirection()) ? '100%' : '100%'"
       [style.width]="isVertical(drawerDirection()) ? '100vw' : '100%'"
       [open]="isOpen()"
       [initialDrawerHeightorWidth]="380"
@@ -87,7 +87,7 @@ export class AppComponent implements OnInit {
   private readonly drawerService = inject(DrawerService);
   readonly isOpen = signal(false);
   public drawerDirectionValues = DrawerDirection;
-  public drawerDirection = signal<DrawerDirectionType>(DrawerDirection.BOTTOM);
+  public drawerDirection = signal<DrawerDirectionType>(DrawerDirection.LEFT);
   public isVertical = isVertical;
 
   ngOnInit(): void {

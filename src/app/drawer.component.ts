@@ -36,7 +36,7 @@ import { DrawerDirection, DrawerDirectionType } from './types';
       (click)="handleStartCycle(drawerRef)"
       [attr.data-vaul-drawer-direction]="direction()"
       [attr.data-state]="(isOpen$ | async) ? 'open' : 'closed'"
-      [style.height]="isVertical(direction()) ? initialDrawerHeightorWidth() + 'px' : '100vh'"
+      [style.height]="isVertical(direction()) ? initialDrawerHeightorWidth() + 'px' : '100%'"
       [style.width]="isVertical(direction()) ? '100vw' : this.initialDrawerHeightorWidth() + 'px'"
       [style.bottom]="isVertical(direction()) ? '0' : 'auto'"
       [style.right]="isVertical(direction()) ? 'auto' : '0'"
@@ -324,8 +324,8 @@ export class DrawerComponent implements AfterViewInit, OnDestroy {
         ? 'bottom'
         : 'top'
       : xPosition > 0
-      ? 'right'
-      : 'left';
+        ? 'right'
+        : 'left';
 
     const isAllowedToSwipe = this.isDeltaInDirection(delta, direction, swipeStartThreshold);
     if (isAllowedToSwipe) this.onDrag(event, element);
