@@ -236,25 +236,26 @@ export class DrawerComponent implements AfterViewInit  {
     window?.visualViewport?.addEventListener('resize', () => {
       this.onVisualViewportChange();
     });
-    set(this.document.body,
-      {
-       'background-color': '#000000',
-        transition: `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
-      },
-      true
-    );
-    set(
-      this.document.getElementById('wrapper'),
-      {
-        borderRadius: `8px`,
-        transform: this.isVerticalOrientation()
-          ? `scale(0.981)`
-          : `scale(0.981)`,
-        transition: `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
-      },
-      true,
-    );
-
+    requestTimeout(() => {
+      set(this.document.body,
+        {
+        'background-color': '#000000',
+          transition: `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
+        },
+        true
+      );
+      set(
+        this.document.getElementById('wrapper'),
+        {
+          borderRadius: `8px`,
+          transform: this.isVerticalOrientation()
+            ? `scale(0.981)`
+            : `scale(0.981)`,
+          transition: `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
+        },
+        true,
+      ) 
+    }, 10, () => {})
   }
 
   onPointerDown(event: PointerEvent, element: HTMLDivElement) {
@@ -546,10 +547,7 @@ export class DrawerComponent implements AfterViewInit  {
     set(this.document.getElementById('wrapper'),
       {
         transform: 'scale(1)',
-        transformOrigin: this.isVerticalOrientation() ? 'top' : 'left',
-        transitionProperty: 'transform, border-radius',
-        transitionDuration: `${TRANSITIONS.DURATION}s`,
-        transitionTimingFunction: `cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
+        transition: `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
       },
       true
     );

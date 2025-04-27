@@ -231,6 +231,7 @@
 
 .data-vaul-drawer-wrapper {
   position: fixed;
+  border-radius: 0;
   inset: 0;
   background-color: #ffffff;
 }
