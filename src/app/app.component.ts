@@ -86,7 +86,6 @@ export class AppComponent implements OnInit {
 
   setIsOpen(value: boolean) {
     this.isOpen.set(value);
-    this.drawerService.setIsOpen(value);
   }
 
   toggleDrawer() {

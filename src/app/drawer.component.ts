@@ -14,7 +14,6 @@ import {
   viewChild
 } from '@angular/core';
 import { HandleComponent } from './handle.component';
-import { OverlayComponent } from './overlay.component';
 import { isIOS, isMobileFirefox } from './services/browser';
 import {
   BODY_DRAG_CLASS,
@@ -51,7 +50,7 @@ import { DrawerDirection, DrawerDirectionType } from './types';
         aria-labelledby="radix-:rh:"
         #drawer
         (click)="handleStartCycle(drawer)"
-        [class]="isVerticalOrientation() ? 'vertical' : 'horizontal'"
+        [class]="[isVerticalOrientation() ? 'vertical' : 'horizontal', direction() === drawerDirection.RIGHT ? 'from-right' : '']"
         [attr.data-vaul-drawer-direction]="direction()"
         [attr.data-vaul-isdragging]="isDragging()"
         [attr.data-state]="isOpen() ? 'open' : 'closed'"
@@ -109,13 +108,14 @@ import { DrawerDirection, DrawerDirectionType } from './types';
     }
 
   `,
-  imports: [HandleComponent, OverlayComponent],
+  imports: [HandleComponent],
 })
 export class DrawerComponent implements AfterViewInit  {
   private readonly drawerService = inject(DrawerService);
 
   public fixed = input(true);
   public direction = input<DrawerDirectionType>(DrawerDirection.BOTTOM);
+  public drawerDirection = DrawerDirection;
   public shouldScaleBackground = input(true);
   public dismissible = input(true);
   public removeDrawer = output<void>();
@@ -239,7 +239,6 @@ export class DrawerComponent implements AfterViewInit  {
     requestTimeout(() => {
       set(this.document.body,
         {
-        'background-color': '#000000',
           transition: `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
         },
         true
@@ -265,7 +264,6 @@ export class DrawerComponent implements AfterViewInit  {
   }
 
   onPointerUp(event: PointerEvent | MouseEvent, element: HTMLDivElement) {
-    console.log('onPointerUp. Reset start point');
     this.wasBeyondThePoint.set(false);
     this.onRelease(event, element, this.direction());
   }
@@ -297,7 +295,7 @@ export class DrawerComponent implements AfterViewInit  {
     const deltaX = Math.abs(delta.x);
     const isDeltaX = deltaX > deltaY;
     const dFactor = ['bottom', 'right'].includes(direction) ? 1 : -1;
-    if (direction === 'left' || direction === 'right') {
+    if (direction === 'right') {
       const isReverseDirection = delta.x * dFactor < 0;
       if (!isReverseDirection && deltaX >= 0 && deltaX <= threshold) {
         return !isDeltaX;
@@ -366,21 +364,18 @@ export class DrawerComponent implements AfterViewInit  {
       set(this.overlayRef()?.nativeElement, {
         transition: 'none',
       });
-        console.log('translate:', isDraggingInDirection);
       
       // TODO make is DraggingInDirection work. Now it gets false then true but does never enter this condition
       if (isDraggingInDirection) {
         // TODO: Find out why this does not work
         // const dampenedDraggedDistance = this.drawerService.dampenValue(absDraggedDistance);
         const translateValue = Math.max(draggedDistance, 0) * directionMultiplier;
-        console.log('translateValue',translateValue, directionMultiplier);
         set(element, {
           transform: this.isVerticalOrientation()
             ? `translate3d(0, ${translateValue}px, 0)`
             : `translate3d(${translateValue}px, 0, 0)`,
         });
       const opacityValue = 1 - percentageDragged;
-      console.log('overlay', this.overlayRef()?.nativeElement)
       set(
         this.overlayRef()?.nativeElement,
         {
@@ -437,10 +432,7 @@ export class DrawerComponent implements AfterViewInit  {
     this.isAllowedToDrag.set(false);
     if (!event || !event?.target) return;
     this.dragEndTime.set(new Date());
-    console.log('mat:', element)
     const swipeAmount = this.drawerService.getTranslate(element, this.direction());
-    console.log(swipeAmount, 'swipe');
-    // !this.drawerService.shouldDrag(event.target, false, this.direction()) ||
     if (
       !event ||
       !swipeAmount ||
@@ -452,7 +444,6 @@ export class DrawerComponent implements AfterViewInit  {
     const timeTaken = (this.dragEndTime()?.getTime() || 0) - (this.dragStartTime()?.getTime() || 0);
     const distMoved = (isVertical(direction) ? event.pageY : event.pageX) - (this.pointerStartPosition || 0);
     const velocity = Math.abs(distMoved) / timeTaken;
-    console.log(velocity, 'distMoved');
     if (velocity > 0.05) {
       // `justReleased` is needed to prevent the drawer from focusing on an input when the drag ends, as it's not the intent most of the time.
       setTimeout(() => {
@@ -460,27 +451,22 @@ export class DrawerComponent implements AfterViewInit  {
       }, 200);
     }
     // Moved upwards, don't do anything
-    const isGoingOppositeDirection = event.pageY - (this.pointerStartPosition || 0) < 0;
+    const isGoingOppositeDirection = (event.pageY - (this.pointerStartPosition || 0) < 0) && (event.pageX - (this.pointerStartPosition || 0) < 0);
     if ((direction === DrawerDirection.BOTTOM || direction === DrawerDirection.RIGHT) && isGoingOppositeDirection) {
-      console.log('on release reset drawer opposite')
       this.resetDrawer(direction, element);
       return;
     }
     if (velocity > VELOCITY_THRESHOLD) {
-      console.log('close drawer for velocity');
       this.closeDrawer(element);
       return;
     }
     const visibleDrawerHeight = Math.min(element?.getBoundingClientRect().height ?? 0, window.innerHeight);
     const visibleDrawerWidth = Math.min(element?.getBoundingClientRect().width ?? 0, window.innerWidth);
-    const isHorizontalSwipe = direction === 'left' || direction === 'right';
-    console.log('swipeAmount', swipeAmount, visibleDrawerHeight)
+    const isHorizontalSwipe = direction === 'right';
     if (Math.abs(swipeAmount) >= (isHorizontalSwipe ? visibleDrawerWidth : visibleDrawerHeight) * CLOSE_THRESHOLD) {
-      console.log('close drawer cause distance')
       this.closeDrawer(element);
       return;
     }
-    console.log('on release reset drawer')
     this.resetDrawer(direction, element);
   }
 
@@ -497,9 +483,6 @@ export class DrawerComponent implements AfterViewInit  {
       transition: `opacity ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
       opacity: '1',
     });
-    // set(wrapper, {
-    //   transform: 'scale(1)'
-    // });
     // Don't reset background if swiped upwards
     if (this.shouldScaleBackground() && currentSwipeAmount && currentSwipeAmount < 0 && this.isOpen()) {
       set(

@@ -1,4 +1,5 @@
 :root {
+  --initial-transform: calc(100% + 8px);
   --vaul-drawer-z-index: 1000;
   --vaul-overlay-z-index: 999;
 }
@@ -23,13 +24,18 @@
 }
 
 .horizontal {
-  padding-top: 2rem;
+  border-radius: 1rem;
+  padding: 2rem 1.5rem;
   min-width: 310px;
   height: 100%;
 }
 
 .horizontal .vaul-handle-hitarea {
   display: none !important;
+}
+
+.from-right {
+  right: 0.5rem !important;
 }
 
 [data-vaul-drawer-direction='bottom'] {
@@ -219,7 +225,7 @@
     transform: translate3d(var(--initial-transform, 100%), 0, 0);
   }
   to {
-    transform: translate3d(0, 0, 0);
+    transform: translate3d(0, 0, -100%);
   }
 }
 

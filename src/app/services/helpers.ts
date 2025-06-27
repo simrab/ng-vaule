@@ -123,7 +123,7 @@ export function isInput(target: Element) {
 }
 
 export function isVertical(direction: DrawerDirectionType) {
-  return direction === 'top' || direction === 'bottom' ? true : false;
+  return direction === 'bottom' ? true : false;
 }
 
 // TODO: Improve typings
