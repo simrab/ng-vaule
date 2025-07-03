@@ -9,6 +9,7 @@ import {
   inject,
   input,
   model,
+  OnDestroy,
   output,
   signal,
   viewChild
@@ -110,7 +111,7 @@ import { DrawerDirection, DrawerDirectionType } from './types';
   `,
   imports: [HandleComponent],
 })
-export class DrawerComponent implements AfterViewInit  {
+export class DrawerComponent implements AfterViewInit, OnDestroy  {
   private readonly drawerService = inject(DrawerService);
 
   public fixed = input(true);
@@ -610,27 +611,15 @@ export class DrawerComponent implements AfterViewInit  {
       element = element.parentNode as HTMLElement;
     }
 
-    // No scrollable parents not scrolled to the top found, so drag
     return true;
   }
+
+  ngOnDestroy(): void {
+      if (window?.visualViewport) {
+        window.visualViewport.removeEventListener('resize', this.onVisualViewportChange.bind(this));
+      }
+      if (isIOS()) {
+        window.removeEventListener('touchend', () => this.isAllowedToDrag.set(false), true);
+      }
+  }
 }
-
-//   private updateDrawerTransform(drawer: HTMLElement, direction: DrawerDirectionType) {
-//     const offset = isVertical(direction)
-//       ? drawer?.getBoundingClientRect().width
-//       : drawer?.getBoundingClientRect().height;
-
-//     // Get current drag state
-//     const dragDelta = this.isDragging() ? this.calculateDragDelta() : 0;
-//     const finalOffset = offset + dragDelta;
-//     const transform = isVertical(direction)
-//       ? `translateY(${finalOffset - offset}px)`
-//       : `translateX(${finalOffset - offset}px)`;
-//     set(drawer, {
-//       transition: this.isDragging()
-//         ? 'none'
-//         : `transform ${TRANSITIONS.DURATION}s cubic-bezier(${TRANSITIONS.EASE.join(',')})`,
-//       transform,
-//     });
-//   }
-// }
