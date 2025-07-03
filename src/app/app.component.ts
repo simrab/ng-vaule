@@ -6,7 +6,7 @@ import {
   ViewContainerRef,
   inject,
   input,
-  model
+  model,
 } from '@angular/core';
 import { DrawerComponent } from './drawer.component';
 import { DrawerService } from './services/drawer.service';
