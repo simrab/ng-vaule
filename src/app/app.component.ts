@@ -87,7 +87,7 @@ export class AppComponent implements OnInit {
   private readonly drawerService = inject(DrawerService);
   readonly isOpen = signal(false);
   public drawerDirectionValues = DrawerDirection;
-  public drawerDirection = signal<DrawerDirectionType>(DrawerDirection.LEFT);
+  public drawerDirection = signal<DrawerDirectionType>(DrawerDirection.BOTTOM);
   public isVertical = isVertical;
 
   ngOnInit(): void {
